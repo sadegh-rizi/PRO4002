@@ -1,0 +1,147 @@
+
+
+```{r set-directory}
+# Set working directory to the location of this script
+library(rstudioapi)        # For setting working directory
+
+setwd(dirname(getActiveDocumentContext()$path))
+
+# Verify working directory
+getwd()
+```
+
+```{r}
+# ==============================================================================
+# Script: 002_DCM_Clustering_Discovery.R
+# Purpose: Unsupervised clustering of DCM patients to identify molecular subtypes
+# Input: expression.rds, sampleInfo.rds
+# Output: Consensus plots, annotated heatmap, updated metadata with cluster labels
+# ==============================================================================
+
+# 1. Load Libraries
+library(tidyverse)
+library(here)
+library(ConsensusClusterPlus)
+library(pheatmap)
+library(RColorBrewer)
+
+
+# 2. Load Data
+# Using 'here' for robust path handling
+expression <- readRDS("results/expression.rds")
+sampleInfo <- readRDS("results/sampleInfo.rds")
+
+# 3. Data Preparation
+# Filter for DCM samples only
+dcm_samples <- sampleInfo %>% 
+  filter(etiology == "DCM") %>% 
+  rownames()
+
+# Subset expression matrix to DCM samples only
+dcm_expr <- expression[, dcm_samples]
+
+# Check dimensions
+print(paste("Number of DCM samples:", length(dcm_samples)))
+
+# 4. Feature Selection (Crucial Step)
+# We select the top most variable genes to drive the clustering.
+# This removes "housekeeping" genes that don't change and add noise.
+# (Standard practice: Top 2000 - 5000 genes)
+
+# Calculate variance for each gene across DCM patients
+gene_vars <- apply(dcm_expr, 1, var)
+
+# Select top 2000 genes with highest variance
+top_n <- 2000
+top_genes <- names(sort(gene_vars, decreasing = TRUE))[1:top_n]
+
+# Create the final matrix for clustering
+dcm_matrix_top <- dcm_expr[top_genes, ]
+
+# Center the data (Z-score) - vital for heatmaps so we see relative up/down regulation
+dcm_matrix_centered <- t(scale(t(dcm_matrix_top)))
+
+# 5. Run Consensus Clustering
+# This runs hierarchical clustering 1000 times to find stable groups.
+
+# Define output folder for the plots
+plot_dir <- here("sandbox","sadegh","plots", "Consensus_Clustering")
+if(!dir.exists(plot_dir)) dir.create(plot_dir, recursive = TRUE)
+
+results <- ConsensusClusterPlus(
+  dcm_matrix_centered,
+  maxK = 6,              # Test k=2 to k=6 clusters
+  reps = 1000,           # Resample 1000 times (High robustness)
+  pItem = 0.8,           # Use 80% of samples per iteration
+  pFeature = 1,          # Use 100% of the top genes
+  title = plot_dir,      # Where to save the PDF plots
+  clusterAlg = "pam",     # Hierarchical clustering
+  distance = "pearson",
+  seed = 123,
+  plot = "png"
+)
+
+# 6. Extract Cluster Labels
+# NOTE: Check the 'delta_area.png' in the plots folder to confirm optimal k.
+# Usually, k=2 or k=3 is best. We will extract k=2 as a starting point.
+k_choice <- 3
+cluster_labels <- results[[k_choice]][["consensusClass"]]
+
+# Create labels like "Cluster 1" instead of just "1"
+# 6. Extract Cluster Labels
+# UPDATED: Set k=3 based on your Delta Area plot
+k_choice <- 3
+cluster_labels <- results[[k_choice]][["consensusClass"]]
+
+# Create labels like "Cluster_1" instead of just "1"
+cluster_labels_formatted <- paste0("Cluster_", cluster_labels)
+names(cluster_labels_formatted) <- names(cluster_labels)
+
+# 7. Update Metadata
+# Create a new column in sampleInfo for the subtype
+sampleInfo$DCM_Subtype <- NA 
+sampleInfo[names(cluster_labels_formatted), "DCM_Subtype"] <- cluster_labels_formatted
+
+# 8. Visualisation: The Final Heatmap
+# We visualize the clusters with clinical annotations (LVEF, Gender)
+
+# Prepare Annotation DataFrame
+annotation_df <- sampleInfo %>%
+  filter(rownames(.) %in% dcm_samples) %>%
+  select(DCM_Subtype, gender, LVEF, race)
+
+# Define custom colors for annotation
+# UPDATED: Added color for Cluster_3 so the heatmap legend is complete
+ann_colors <- list(
+  DCM_Subtype = c(
+    Cluster_1 = "#E41A1C",  # Red
+    Cluster_2 = "#377EB8",  # Blue
+    Cluster_3 = "#4DAF4A"   # Green (Added for 3rd cluster)
+  ),
+  gender = c(Male = "grey30", Female = "grey80"),
+  LVEF = c("white", "firebrick") # Continuous color scale for heart function
+)
+
+# Plot Heatmap
+pheatmap(
+  dcm_matrix_centered,
+  color = colorRampPalette(c("navy", "white", "firebrick3"))(100),
+  breaks = seq(-2, 2, length.out = 101), # Cap scale at z-score +/- 2
+  show_rownames = FALSE,      # Too many genes to show names
+  show_colnames = FALSE,      # Hiding sample names for cleaner look
+  annotation_col = annotation_df,
+  annotation_colors = ann_colors,
+  clustering_method = "ward.D2",
+  cutree_cols = k_choice,     # Split the tree into our 3 groups
+  main = paste0("DCM Molecular Subtypes (Top ", top_n, " Variable Genes)"),
+  filename = "plots/Final_DCM_Subtype_Heatmap.pdf",
+  width = 10, height = 8
+)
+
+# 9. Save Results
+# Save the updated metadata so the next person (Validation/lncRNA) can use it
+saveRDS(sampleInfo, "results/sampleInfo_with_clusters.rds")
+
+print("Clustering Complete. Results saved to 'results/sampleInfo_with_clusters.rds'")
+
+```
