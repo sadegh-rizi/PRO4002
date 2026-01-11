@@ -1,0 +1,241 @@
+
+
+```{r set-directory}
+
+library(rstudioapi)        # For setting working directory
+# Set working directory to the location of this script
+setwd(dirname(getActiveDocumentContext()$path))
+
+# Verify working directory
+getwd()
+```
+
+
+
+```{r}
+#=============================================================================#
+# RNAseq.R                                          #
+#																	                                       		  #
+# Version: 1.0   															                                #
+# Date: Dec 12, 2025											                                    #
+# Author: Sadegh Rizi             #
+# History:																	                                  #
+#  1.0: Creation
+#  1.1: Update the publication ready table with gt package
+#  1.2: Fix bugs
+#  1.3: Create a function for PCA plots to remove redundancy
+#  1.4: Reorder steps so that filtering is before statistical analysis
+# Description: Differential Expression Analysis of MAGNET dataset
+
+#=============================================================================#
+
+
+# This script serves as a scaffold for RNA-seq anaylsis of MAGNET dataset. 
+
+# MAGNET dataset overview: 
+# WORKFLOW 
+
+# step0: library loading
+# step1: Data import
+# step2: Diagnostic plots
+# step3: Statistical Analysis
+# step4: Gene Annotation
+# step5: Relative expression level
+# step6: Export the results
+
+
+### Step 0: Importing Libraries and setting working directories
+# Before that we check for package installations
+
+if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+
+bio_pkgs <- c("limma", "edgeR", "qvalue", "biomaRt", "pcaMethods","EnhancedVolcano")
+
+for (pkg in bio_pkgs) {
+  if (!require(pkg, character.only = TRUE)) {
+    message(paste("Installing Bioconductor package:", pkg))
+    BiocManager::install(pkg, ask = FALSE)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+cran_pkgs <- c("tidyverse", "gt", "gtsummary", "here")
+
+for (pkg in cran_pkgs) {
+  if (!require(pkg, character.only = TRUE)) {
+    message(paste("Installing CRAN package:", pkg))
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+if (!require("here", quietly = TRUE)) install.packages("here")
+library(here)
+
+#Load necessary packages
+library(tidyverse) # Covers ggplot2, dplyr, readr, tidyr
+
+# For differential analysis
+library(limma)
+library(edgeR)
+library(qvalue)
+
+# For gene annotation
+library(biomaRt)
+
+
+# Libraries for Exporting participants table 
+#install.packages("gt")
+#install.packages("webshot2")
+
+# For exporting publication-ready tables
+library(gt)
+library(gtsummary)
+
+
+# PCA
+library(pcaMethods)
+
+
+
+
+# Verify working directory
+print(paste("Working directory set to:", getwd()))
+
+if (!dir.exists("results")) {
+  dir.create("results")
+}
+
+
+
+### Step 1: Data import 
+## 1.a : Importing the data
+expression_input_file <- "data/MAGNET_GeneExpressionData_CPM_19112020.txt"
+sample_input_file <- "data/MAGNET_SampleData_18112022.csv"
+gene_length_input <- "data/MAGNET_exonLengths.txt"
+
+
+# Control check to see if files exist in the data directory
+#otherwise stop
+for (file_path in c(expression_input_file,sample_input_file,gene_length_input)){
+  if (!file.exists(file_path)) stop
+}
+
+expression <- as.matrix(read.delim(expression_input_file,
+                                   row.names=1))
+sampleInfo <- read.csv(sample_input_file, row.names=1)
+gene_lengths <- read.delim(gene_length_input, row.names=1)
+
+# Sanity check to see if rows of sample metadata table match the columns of gene
+# expression table
+(all(colnames(expression) == rownames(sampleInfo))) #TRUE, just to make sure
+
+
+## 1.b : Exporting a publication-ready table of patient characteristics
+
+sampleInfo <-sampleInfo %>% mutate(bmi= weight/(height*0.01)^2)
+
+
+
+### Step 2: Diagnostic plots
+
+## a. At least one data distribution figure (e.g. boxplots, density plots) that enables 
+# comparing samples.
+#here we want to see if the disribution of gene expression for each sample is 
+#comparable to the other samples
+
+# Make the expression matrix into a long format, so it can be merged with 
+# sample metadata and ease of plotting
+expression_long <- expression %>% as.data.frame() %>% pivot_longer(cols=-1,names_to = "sample_name",
+                                                                   values_to="expression"
+)
+
+sampleInfo$sample_name <- rownames(sampleInfo)
+#merging sample metadata with gene expression matrix (long-format)
+merged_df <- expression_long %>% left_join(sampleInfo,by="sample_name")
+
+
+# use homo sapiens gene ensembl dataset
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+ensembl_ids <- rownames(expression)
+
+
+# mapping: INPUT: ensembl_gene_id
+# OUTPUT: gene symbol, location of gene, and description
+gene_map <- getBM(attributes = c("ensembl_gene_id","external_gene_name","description","chromosome_name", 
+                                 "start_position", 
+                                 "end_position","gene_biotype"),
+                  filters = "ensembl_gene_id",
+                  values=ensembl_ids,
+                  mart=ensembl)
+head(gene_map)
+
+# change the column  name of to gene_symbol for easier readability
+gene_map<-gene_map %>% rename("gene_symbol"="external_gene_name")
+
+
+
+
+
+
+
+
+## Step 4: relative expression levels
+
+# This is performed before Step 3 (which is the statistical analysis)! 
+# Before doing the differential expression we need to filter the genes
+# that we assume are not expressed.
+# We use genes expressed in chromsome Y of female patients as the noise or 
+# background value
+
+
+all(rownames(gene_lengths) == rownames(expression)) # TRUE (just a check)
+
+
+# Function to convert logCPM to fpkm value, from skill sessions
+cpm2fpkm <- function(x) {
+  .t <- 2^(x) * 1E3 / gene_lengths[, 1]
+}
+
+
+expression_fpkm <- cpm2fpkm(expression)
+
+# To define baseline value, we take Y chromosome gene expressions in female samples
+
+female_samples <- sampleInfo %>% filter(gender=="Female") %>% pull(sample_name)
+ychromosome_genes<- gene_map %>% filter(chromosome_name=="Y") %>% pull(ensembl_gene_id)
+expression_noise<- expression_fpkm[ychromosome_genes,female_samples]
+background_threshold <- mean(expression_noise,na.rm=TRUE)
+
+print(paste("Background Noise Threshold (FPKM):", round(background_threshold, 4)))
+
+# Now if the average expression of a gene is lower than this baseline we consider
+# it noise. 
+
+
+
+gene_means <- rowMeans(expression_fpkm)
+is_expressed <- gene_means>background_threshold
+expressed_filtered <- expression_fpkm[is_expressed,]
+
+
+mean_expression_dataframe <- data.frame(mean_expression=gene_means)
+
+
+
+
+# How many genes are selected? 15,585/20,781 (around 75%)
+table(is_expressed)
+
+background_df <- data.frame(
+  EnsemblGeneID = names(is_expressed), 
+  Above_Background_Threshold = is_expressed
+)
+
+expression <- expression[is_expressed,]
+
+saveRDS(expression, file = "results/expression.rds")
+saveRDS(sampleInfo, file = "results/sampleInfo.rds")
+
+
+```
