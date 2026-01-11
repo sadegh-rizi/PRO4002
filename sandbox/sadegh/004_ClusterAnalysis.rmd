@@ -1,0 +1,211 @@
+```{r}
+
+# ==============================================================================
+# Script: 03_Cluster_Characterization_Full.R
+# Purpose: Comprehensive 3-way comparison of DCM molecular subtypes
+# ==============================================================================
+
+library(tidyverse)
+library(here)
+library(limma)
+library(edgeR)
+library(clusterProfiler)
+library(org.Hs.eg.db) 
+library(pheatmap)
+library(ggvenn) # Install if needed: install.packages("ggvenn")
+
+# 1. Load Data (Updated Paths)
+# Note: Ensure you have run the "Safe Merge" script first to get the corrected sampleInfo
+sampleInfo <- readRDS(here("sandbox", "sadegh", "results", "sampleInfo_with_clusters.rds"))
+expression <- readRDS(here("sandbox", "sadegh", "results", "expression.rds"))
+
+# Filter for DCM samples only
+dcm_samples <- sampleInfo %>% 
+  filter(etiology == "DCM" & !is.na(DCM_Subtype)) %>% 
+  rownames()
+
+dcm_expr <- expression[, dcm_samples]
+dcm_meta <- sampleInfo[dcm_samples, ]
+
+# 2. Design Matrix & Contrasts
+dcm_meta$DCM_Subtype <- factor(dcm_meta$DCM_Subtype)
+
+# We include Age/Gender/Batch to correct for them (even if Gender is NS, it's good practice)
+design <- model.matrix(~0 + DCM_Subtype + age + gender + Library.Pool, data = dcm_meta)
+colnames(design) <- gsub("DCM_Subtype", "", colnames(design))
+
+# Fit Linear Model
+fit <- lmFit(dcm_expr, design)
+
+# Define ALL 3 Pairwise Contrasts
+cm <- makeContrasts(
+  C1_vs_C2 = Cluster_1 - Cluster_2,
+  C1_vs_C3 = Cluster_1 - Cluster_3,
+  C2_vs_C3 = Cluster_2 - Cluster_3,
+  levels = design
+)
+
+fit2 <- contrasts.fit(fit, cm)
+fit2 <- eBayes(fit2, trend = TRUE)
+
+# 3. Extract Results for All Comparisons
+get_degs <- function(fit_obj, coef_name) {
+  topTable(fit_obj, coef = coef_name, number = Inf) %>%
+    rownames_to_column("EnsemblID") %>%
+    mutate(Comparison = coef_name)
+}
+
+all_degs <- bind_rows(
+  get_degs(fit2, "C1_vs_C2"),
+  get_degs(fit2, "C1_vs_C3"),
+  get_degs(fit2, "C2_vs_C3")
+)
+
+# Save the master table
+write_tsv(all_degs, here("sandbox", "sadegh", "results", "All_Clusters_DE_Results.txt"))
+
+# 4. Pathway Enrichment Loop (The "Bio-Automation")
+# We loop through each comparison to generate a Dotplot
+
+comparisons <- c("C1_vs_C2", "C1_vs_C3", "C2_vs_C3")
+
+for(comp in comparisons) {
+  
+  # Select SIGNIFICANT UPREGULATED genes for the first group in the pair
+  # (e.g., for C1_vs_C2, genes higher in C1)
+  sig_genes <- all_degs %>%
+    filter(Comparison == comp) %>%
+    filter(adj.P.Val < 0.05 & logFC > 0.58) %>% 
+    pull(EnsemblID)
+  
+  print(paste("Processing:", comp, "- Genes found:", length(sig_genes)))
+  
+  if(length(sig_genes) > 10) { # Only run if we have enough genes
+    
+    ego <- enrichGO(
+      gene = sig_genes,
+      OrgDb = org.Hs.eg.db,
+      keyType = "ENSEMBL",
+      ont = "BP",
+      pAdjustMethod = "BH",
+      pvalueCutoff = 0.05,
+      qvalueCutoff = 0.05
+    )
+    
+    if(!is.null(ego)) {
+      # Save Dotplot
+      dp <- dotplot(ego, showCategory = 15) + 
+        ggtitle(paste("Enriched Pathways:", comp))
+      
+      ggsave(here("sandbox", "sadegh", "plots", paste0("GO_", comp, ".pdf")), dp, width=8, height=8)
+    }
+  }
+}
+
+# 5. Venn Diagram: How much overlap is there?
+# Create a list of genes UP in Cluster 1 (vs 2) and UP in Cluster 1 (vs 3)
+# This defines the "Core Cluster 1 Signature"
+genes_C1_vs_C2 <- all_degs %>% filter(Comparison=="C1_vs_C2" & adj.P.Val<0.05 & logFC>0) %>% pull(EnsemblID)
+genes_C1_vs_C3 <- all_degs %>% filter(Comparison=="C1_vs_C3" & adj.P.Val<0.05 & logFC>0) %>% pull(EnsemblID)
+
+venn_data <- list(
+  C1_vs_C2 = genes_C1_vs_C2,
+  C1_vs_C3 = genes_C1_vs_C3
+)
+
+venn_plot <- ggvenn(venn_data, fill_color = c("#E41A1C", "#377EB8")) +
+  ggtitle("Defining the Core Cluster 1 Signature")
+
+ggsave(here("sandbox", "sadegh", "plots", "Venn_Cluster1_Signature.pdf"), venn_plot)
+
+
+
+```
+
+
+
+
+```{r}
+
+
+design <- model.matrix(~0 + DCM_Subtype + age + gender + Library.Pool, data = dcm_meta)
+colnames(design) <- gsub("DCM_Subtype", "", colnames(design))
+
+fit <- lmFit(dcm_expr, design)
+
+# 3. Define "One-vs-Rest" Contrasts
+# We compare each cluster to the average of the other two
+cm <- makeContrasts(
+  C1_Identity = Cluster_1 - (Cluster_2 + Cluster_3)/2,
+  C2_Identity = Cluster_2 - (Cluster_1 + Cluster_3)/2,
+  C3_Identity = Cluster_3 - (Cluster_1 + Cluster_2)/2,
+  levels = design
+)
+
+fit2 <- contrasts.fit(fit, cm)
+fit2 <- eBayes(fit2, trend = TRUE)
+
+# 4. Extract Markers and Run Enrichment
+# We store the significant gene IDs in a list for the comparison plot later
+cluster_genes_list <- list()
+
+comparisons <- c("C1_Identity", "C2_Identity", "C3_Identity")
+names(comparisons) <- c("Cluster 1", "Cluster 2", "Cluster 3") # Pretty names
+
+for(i in 1:3) {
+  comp_code <- comparisons[i]
+  comp_name <- names(comparisons)[i]
+  
+  # Get UPREGULATED genes (logFC > 0) for this cluster
+  # These are the genes that define this cluster's "High" expression traits
+  top_genes <- topTable(fit2, coef = comp_code, number = Inf) %>%
+    rownames_to_column("EnsemblID") %>%
+    filter(adj.P.Val < 0.05 & logFC > 0.5) # Slight fold-change cutoff to reduce noise
+  
+  print(paste("Cluster", i, "Unique Markers:", nrow(top_genes)))
+  
+  # Save the gene list
+  cluster_genes_list[[comp_name]] <- top_genes$EnsemblID
+  
+  # Run Enrichment (If genes found)
+  if(nrow(top_genes) > 10) {
+    ego <- enrichGO(
+      gene = top_genes$EnsemblID,
+      OrgDb = org.Hs.eg.db,
+      keyType = "ENSEMBL",
+      ont = "BP",
+      pAdjustMethod = "BH",
+      pvalueCutoff = 0.05
+    )
+    
+    if(!is.null(ego)) {
+      # Individual Dotplot
+      dp <- dotplot(ego, showCategory = 15) + 
+        ggtitle(paste("Pathophysiology of", comp_name))
+      
+      ggsave(here("sandbox", "sadegh", "plots", paste0("GO_Identity_", comp_name, ".pdf")), dp, width=9, height=7)
+    }
+  }
+}
+
+# 5. The "Killer Figure": CompareCluster Dotplot
+# This puts all 3 clusters on one plot to show distinct functions
+# (This is usually Figure 3 or 4 in high-impact papers)
+
+print("Generating Comparative Dotplot...")
+ck <- compareCluster(geneCluster = cluster_genes_list, 
+                     fun = "enrichGO", 
+                     OrgDb = org.Hs.eg.db,
+                     keyType = "ENSEMBL",
+                     ont = "BP")
+
+# Visualize
+final_plot <- dotplot(ck, showCategory = 5) + 
+  ggtitle("Functional Divergence of DCM Subtypes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(here("sandbox", "sadegh", "plots", "CompareCluster_Dotplot.pdf"), final_plot, width=10, height=8)
+
+print("Analysis Complete. Check 'plots/CompareCluster_Dotplot.pdf'")
+
+```
