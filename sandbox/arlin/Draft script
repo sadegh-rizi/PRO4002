@@ -119,7 +119,7 @@ dge <- DGEList(counts = dcm_expr_raw)
 # B. Filter genes: Keep genes expressed in at least 50% of patients
 # This is crucial for WGCNA stability later.
 
-keep <- rowSums(cpm(dge) > 1) >= (ncol(dge) * 0.5)
+keep <- rowSums(cpm(dge) > 1) >= (ncol(dge) * 0.75)
 dge_filtered <- dge[keep, , keep.lib.sizes = FALSE]
 
 # C. Calculate Log2-CPM (Matches Yuan et al. Methodology)
@@ -131,7 +131,7 @@ print(paste("Filtered Gene Count (Ready for Clustering):", nrow(dcm_expr_norm)))
 
 #Result
 # "Original Gene Count: 20781"
-#"Filtered Gene Count (Ready for Clustering): 20781"
+#"Filtered Gene Count (Ready for Clustering): 5915"
 
 #DETERMINE OPTIMAL CLUSTERS (NbClust)
 
@@ -176,8 +176,7 @@ val_matrix_clean[is.na(val_matrix_clean)] <- 0
 print(paste("Dimensions after cleaning:", nrow(val_matrix_clean), "Patients x", ncol(val_matrix_clean), "Genes"))
 
 # 3. RUN NBCLUST (Use index = 'silhouette' or 'kl')
-# We avoid index = 'all' because it includes metrics that crash on high-dimensional data.
-# 'silhouette' is the most standard metric for this type of paper.
+# 'silhouette' 
 
 set.seed(123)
 res_nb <- NbClust(val_matrix_clean, 
@@ -345,12 +344,12 @@ cluster_E2 <- rownames(results_E2)
 cluster_E1 <- rownames(results_E1)
 
 # 3. Connect to the Ensembl Database
-# If this fails, wait 10 seconds and try again (server can be busy)
+
 library(biomaRt)
 ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
 
 # 4. Search for the Gene Names
-# We ask biomaRt to give us the 'hgnc_symbol' for our 'ensembl_gene_id' list
+
 gene_map4 <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol", "description"),
                   filters = "ensembl_gene_id",
                   values = cluster_E4,
@@ -370,7 +369,7 @@ gene_map1 <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol", "description
 
 
 # 5. Add the Names to your Table
-# We use 'match' to ensure the names line up exactly with the correct rows
+
 results_E4$Symbol <- gene_map4$hgnc_symbol[match(rownames(results_E4), gene_map4$ensembl_gene_id)]
 results_E4$Description <- gene_map4$description[match(rownames(results_E4), gene_map4$ensembl_gene_id)]
 
@@ -515,7 +514,7 @@ if (!is.null(gost_mirna$result)) {
 }
 
 # ==============================================================================
-# PHASE 9 (FIXED): VALIDATING WITH YOUR EXTERNAL miRNA LIST
+# PHASE 9: VALIDATING WITH YOUR EXTERNAL miRNA 
 # ==============================================================================
 my_mirna_list <- read.csv("Table2_Differential_Expression_Results_miRNAs.csv")
 
