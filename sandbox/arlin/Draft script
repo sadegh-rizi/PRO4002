@@ -96,16 +96,83 @@ dcm_meta <- sample_data %>%
 print(paste("Total DCM Patients for Analysis:", nrow(dcm_meta)))
 
 
-#Total DCM SAMPLES> 166
-# ------------------------------------------------------------------------------
-# 1. SUBSET METADATA FOR DCM PATIENTS
-# ------------------------------------------------------------------------------
-# We focus strictly on Dilated Cardiomyopathy as per your research question.
+library(biomaRt)
+library(dplyr)
 
-# Identify common samples
+# 1. DATA ALIGNMENT (CRITICAL)
+# We need to ensure the gene lengths file matches the expression matrix rows exactly.
 common_samples <- intersect(rownames(dcm_meta), colnames(gene_expression))
 dcm_expr_raw <- gene_expression[, common_samples]
-dcm_meta <- dcm_meta[common_samples, ] # Align metadata
+dcm_meta <- dcm_meta[common_samples, ]
+print(paste("Data Loaded: ", ncol(dcm_expr_raw)))
+
+# 2. DEFINE FPKM FUNCTION
+# Converts counts to abundance by correcting for gene length and library size.
+cpm2fpkm <- function(counts, lengths) {
+  # Library size in Millions
+  lib_sizes <- colSums(counts) / 1e6
+  # Matrix multiplication to adjust for library size
+  rpm <- t(t(counts) / lib_sizes)
+  # Adjust for gene length (kb) - assuming length column is index 1
+  fpkm <- rpm / (lengths[, 1] / 1000)
+  return(fpkm)
+}
+
+# Calculate FPKM for the whole dataset
+dcm_fpkm <- cpm2fpkm(dcm_expr_raw, exons_lenght)
+
+# 3. IDENTIFY Y-CHROMOSOME GENES (THE "NEGATIVE CONTROLS")
+# Connect to Ensembl to find which genes are on the Y chromosome
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+gene_map <- getBM(attributes = c("ensembl_gene_id", "chromosome_name"),
+                  filters = "ensembl_gene_id",
+                  values = rownames(dcm_expr_raw),
+                  mart = ensembl)
+
+# Extract only Y-chromosome IDs
+y_genes <- gene_map %>%
+  filter(chromosome_name == "Y") %>%
+  pull(ensembl_gene_id)
+
+# 4. CALCULATE BACKGROUND THRESHOLD
+# Identify Female DCM patients (They should have 0 expression of Y genes)
+female_samples <- rownames(dcm_meta[dcm_meta$gender == "Female", ])
+
+# Safety check: keep only female samples that exist in our expression data
+female_samples <- intersect(female_samples, colnames(dcm_fpkm))
+
+# Get the expression (FPKM) of Y-genes in these Female patients
+# We only look at Y genes that actually exist in our dataset
+y_genes_present <- intersect(y_genes, rownames(dcm_fpkm))
+
+if(length(female_samples) == 0) {
+  warning("No Female samples found for noise calculation! Using global lower quantile instead.")
+  background_threshold <- quantile(dcm_fpkm, 0.10) # Fallback to bottom 10%
+} else {
+  # This is the line that failed before. 
+  # Now that dcm_fpkm is guaranteed to be a matrix, it will work.
+  noise_values <- dcm_fpkm[y_genes_present, female_samples]
+  background_threshold <- mean(noise_values, na.rm = TRUE)
+}
+
+print(paste("Background Noise Threshold (FPKM):", round(background_threshold, 4)))
+
+# The Threshold = The average "noise" signal found in these negative controls
+background_threshold <- mean(noise_values, na.rm = TRUE)
+
+print(paste("Background Noise Threshold (FPKM):", round(background_threshold, 4)))
+
+# 5. APPLY FILTER TO DATASET
+# We keep genes where the MEAN expression across the cohort is > background noise
+gene_means <- rowMeans(dcm_fpkm)
+keep_genes <- gene_means > background_threshold
+
+# Subset the raw count matrix
+dcm_expr_filtered <- dcm_expr_raw[keep_genes, ]
+
+print(paste("Original Gene Count:", nrow(dcm_expr_raw)))
+print(paste("Filtered Gene Count (Y-Chrom Rule):", nrow(dcm_expr_filtered)))
+
 
 # 2. Install edgeR specifically
 BiocManager::install("edgeR", force = TRUE)
@@ -299,7 +366,7 @@ contrast_matrix <- makeContrasts(
   E1_unique = E1 - (E2 + E3 + E4)/3,
   E2_unique = E2 - (E1 + E3 + E4)/3,
   E3_unique = E3 - (E1 + E2 + E4)/3,
-  E4_unique = E4 - (E1 + E2 + E3)/3, # The mystery cluster
+  E4_unique = E4 - (E1 + E2 + E3)/3,
   levels = design
 )
 
@@ -327,10 +394,10 @@ print(get_top_markers("E2_unique"))
 
 
 # ==============================================================================
-# PHASE 6B: ID TO GENE NAME CONVERSION (Standalone)
+# PHASE 6B: ID TO GENE NAME CONVERSION 
 # ==============================================================================
 
-# 1. Extract the results table for Cluster 4 (The small group)
+# 1. Extract the results table for Cluster 4 
 # We get the top 20 genes specifically for E4
 results_E4 <- topTable(fit2, coef = "E4_unique", number = 20, adjust.method = "fdr")
 results_E3 <- topTable(fit2, coef = "E3_unique", number = 20, adjust.method = "fdr")
