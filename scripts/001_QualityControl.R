@@ -447,8 +447,10 @@ geneExpressionData.CPM.meanFiltered <- geneExpressionData.CPM[aboveBackgroundMea
 
 sampleData.DCM <- subset(sampleData, sampleData$etiology == "DCM")
 geneExpressionData.CPM.DCM <- geneExpressionData.CPM[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name]
-geneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name] 
-geneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name] 
+geneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered[, 
+  colnames(geneExpressionData.CPM.95PFiltered) %in% sampleData.DCM$sample_name] 
+geneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered[, 
+  colnames(geneExpressionData.CPM.meanFiltered) %in% sampleData.DCM$sample_name] 
 
 #-----------------------------------------------------------------------------#
 # EXPORT DCM PATIENT GENE SETS
@@ -459,132 +461,55 @@ saveRDS(geneExpressionData.CPM.95PFiltered.DCM, file.path(cache_path, "geneExpre
 saveRDS(geneExpressionData.CPM.meanFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
 
 #-----------------------------------------------------------------------------#
-# GENE EXPRESSION DATA - PRINCIPLE COMPONENT ANALYSIS 
+# DCM PATIENT GENE SET - DENSITY PLOTs
 #-----------------------------------------------------------------------------#
 
-# Performing a PCA on the Gene Expression Data - specified to compute 10 principle components
-pcaGeneExpressionData <- pca(t(geneExpressionData), nPcs = 10)
-summary(pcaGeneExpressionData)
+extendedGeneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered.DCM %>%
+  tibble::rownames_to_column("gene") %>%
+  pivot_longer(cols=-gene, names_to="patient", values_to="gene_expression_level") %>%
+  left_join(sampleData, by=c('patient'='sample_name'))
 
-# Create Data Frame with Summary of PCA 
-pcaSummaryDF <- data.frame(PC = paste0("PC",factor(1:pcaGeneExpressionData@nPcs)), 
-                                     var = pcaGeneExpressionData@R2, var_cum=pcaGeneExpressionData@R2cum)
-pcaScoresDF <- scores(pcaGeneExpressionData)
-pcaLoadingsDF <- loadings(pcaGeneExpressionData)
-
-# Add PCA Data Frame To Excel File 
-addWorksheet(workbook, "PCA Summary")
-writeData(workbook, "PCA Summary", pcaSummaryDF)
-addWorksheet(workbook, "PCA Scores")
-writeData(workbook, "PCA Scores", pcaScoresDF, rowNames = TRUE)
-addWorksheet(workbook, "PCA Loadings")
-writeData(workbook, "PCA Loadings", pcaLoadingsDF, rowNames = TRUE)
-
-# Plot Principle Components vs Variance in Data Explained by Component & Sum of Variance
-pcaVarianceExplainedPlot <- ggplot(pcaSummaryDF, aes(x = PC)) +
-  geom_col(aes(y = var*100), fill = npg_colors[2], alpha = 0.7, color = npg_colors[2]) +   
-  geom_line(aes(y = var_cum*100, group = 1)) + 
-  geom_point(aes(y = var_cum*100)) +
-  labs(title="Principle Component vs. Variance Explained",
-       x = "Principal Component", y = "Percentage of Variance Explained (%)") +
-  theme_minimal()
-pcaVarianceExplainedPlot
-
-# Combining Principle Components with the Corresponding Sample Data
-pcaSampleInfoDF <- cbind(scores(pcaGeneExpressionData), sampleData)
-
-# Plot PCA Results (PC1 vs PC2 & PC3 vs PC4)
-scatterVariablePlotPCA.PC1PC2 <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color=etiology)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(title="PC1 vs. PC2", color='Etiology') +
+# Data Distribution 
+densityPlotDataDistribution.meanFiltered.DCM <- ggplot(data = extendedGeneExpressionData.CPM.meanFiltered.DCM, 
+  aes(x = gene_expression_level)) +
+  geom_density(alpha=0.7, fill=npg_colors[[1]]) +
+  labs(title="Gene Expression Level Density Plot", x="Gene Expression Level (logCPM)", y="Density") +
   scale_color_npg() +
   scale_fill_npg() +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2
+  center_title + my_style
 
-scatterVariablePlotPCA.PC3PC4 <- ggplot(pcaSampleInfoDF, aes(PC3, PC4, color = etiology)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC3 (", pcaGeneExpressionData@R2[3] * 100, "% of the variance)")) +
-  ylab(paste("PC4 (", pcaGeneExpressionData@R2[4] * 100, "% of the variance)")) +
-  labs(title="PC3 vs. PC4", color='Etiology') +
+ggsave(file.path(plots_path, "densityPlotDataDistribution_meanFiltered_DCM.jpg"), 
+       plot = densityPlotDataDistribution.meanFiltered.DCM, 
+       width = 8, height = 6, dpi = 300 )
+
+extendedGeneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered.DCM %>%
+  tibble::rownames_to_column("gene") %>%
+  pivot_longer(cols=-gene, names_to="patient", values_to="gene_expression_level") %>%
+  left_join(sampleData, by=c('patient'='sample_name'))
+
+# Data Distribution 
+densityPlotDataDistribution.95PFiltered.DCM <- ggplot(data = extendedGeneExpressionData.CPM.95PFiltered.DCM, 
+  aes(x = gene_expression_level)) +
+  geom_density(alpha=0.7, fill=npg_colors[[1]]) +
+  labs(title="Gene Expression Level Density Plot", x="Gene Expression Level (logCPM)", y="Density") +
   scale_color_npg() +
   scale_fill_npg() +
-  theme_minimal()
-scatterVariablePlotPCA.PC3PC4
+  center_title + my_style
 
-# Combine Both PCA Plots into Single Image
-sharedLegendPlotPCA <- get_legend(scatterVariablePlotPCA.PC1PC2)
-scatterVariablePlotPCA.PC1PC2 <- scatterVariablePlotPCA.PC1PC2 + theme(legend.position = "none")
-scatterVariablePlotPCA.PC3PC4 <- scatterVariablePlotPCA.PC3PC4 + theme(legend.position = "none")
-scatterVariablePlotPCA.combined <- grid.arrange(arrangeGrob(scatterVariablePlotPCA.PC1PC2, 
-                                                            scatterVariablePlotPCA.PC3PC4, 
-                                                            nrow = 1), 
-                                                sharedLegendPlotPCA,
-                                                ncol = 2, widths = c(8,1),
-                                                top = "Principle Component Analysis")
-
-# Plot PCA Results (PC1 vs PC2) vs Gender, Age, Race & Library.Pool
-scatterVariablePlotPCA.PC1PC2.gender <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color = gender)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Gender') +
-  scale_color_manual(values = npgAdditionalColors) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.gender
-
-scatterVariablePlotPCA.PC1PC2.age <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color = age)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Age') +
-  scale_color_gradientn(colors = continuousnpg_colors) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.age
-
-scatterVariablePlotPCA.PC1PC2.race <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color=race)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Race') +
-  scale_color_manual(values = npgAdditionalColors) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.race
-
-scatterVariablePlotPCA.PC1PC2.libraryPool <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color=Library.Pool)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Library.Pool') +
-  scale_color_manual(values = npgAdditionalColors) +
-  stat_ellipse(aes(color = Library.Pool)) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.libraryPool
-
-# Combine Four PC1vsPC2 Plots into Single Image
-scatterVariablePlotPCA.variables <- grid.arrange(scatterVariablePlotPCA.PC1PC2.gender, 
-                                                 scatterVariablePlotPCA.PC1PC2.age,
-                                                 scatterVariablePlotPCA.PC1PC2.race, 
-                                                 scatterVariablePlotPCA.PC1PC2.libraryPool,
-                                                 top = "Principle Component Analysis (PC1vsPC2)")
-
-
-
-#-----------------------------------------------------------------------------#
-# DCM PATIENT GENE SET
-#-----------------------------------------------------------------------------#
+ggsave(file.path(plots_path, "densityPlotDataDistribution_95PFiltered_DCM.jpg"), 
+       plot = densityPlotDataDistribution.95PFiltered.DCM, 
+       width = 8, height = 6, dpi = 300 )
 
 #-----------------------------------------------------------------------------#
 # SYSTEM-SPECIFIC GENE SET - IMMUNE
 #-----------------------------------------------------------------------------#
 
-#-----------------------------------------------------------------------------#
-# SYSTEM-SPECIFIC GENE SET - HORMONAL 
-#-----------------------------------------------------------------------------#
+innateDB.RAW <- read.csv(file.path(data_path, "InnateDB_genes.csv"), header=TRUE, na="NA")
+innateDB <- subset(innateDB.RAW, innateDB.RAW$species == "Homo sapiens")
 
-#-----------------------------------------------------------------------------#
-# SYSTEM-SPECIFIC GENE SET - CARDIOVASCULAR 
-#-----------------------------------------------------------------------------#
+geneExpressionData.CPM.DCM.INNATE <- geneExpressionData.CPM.DCM[rownames(geneExpressionData.CPM.DCM) %in% innateDB$ensembl, ]
+geneExpressionData.CPM.meanFiltered.DCM.INNATE <- geneExpressionData.CPM.meanFiltered[
+  rownames(geneExpressionData.CPM.meanFiltered) %in% innateDB$ensembl, ]
 
+saveRDS(geneExpressionData.CPM.DCM.INNATE, file.path(cache_path, "geneExpressionData_DCM_INNATE.rds"))
+saveRDS(geneExpressionData.CPM.meanFiltered.DCM.INNATE, file.path(cache_path, "geneExpressionData_DCM_meanFiltered_INNATE.rds"))
