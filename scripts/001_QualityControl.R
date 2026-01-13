@@ -15,7 +15,7 @@ analysis_packages <- c(
   "tidyverse", "tidyr", "dplyr", "gridExtra", "pcaMethods",
   "data.table", "tableone", "kableExtra", "rmarkdown",
   "readr", "readxl", "gprofiler2", "knitr", "Hmisc", "table1",
-  "gt", "gtsummary", "ggsci"
+  "gt", "gtsummary", "ggsci", "DESeq2", "edgeR"
 )
 
 bio_packages <- c("limma", "qvalue", "biomaRt", "Biocmanager")
@@ -56,10 +56,10 @@ center_title <- theme(plot.title = element_text(hjust = 0.5, vjust = 1))
 
 target_font <- "sans" 
 my_style <- theme(
-  text = element_text(family = target_font),        # Forces the font
-  plot.title = element_text(hjust = 0.5, face="bold"), # Centers & bolds title
-  axis.title = element_text(face = "bold"),         # Bolds axis titles
-  legend.position = "right"                         # Default legend position
+  text = element_text(family = target_font),        
+  plot.title = element_text(hjust = 0.5, face="bold"),
+  axis.title = element_text(face = "bold"),    
+  legend.position = "right"                    
 )
 
 
@@ -69,6 +69,7 @@ my_style <- theme(
 
 if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) { 
   script_path <- dirname(rstudioapi::getActiveDocumentContext()$path)
+  setwd(script_path)
 } else {
   warning("Not running in RStudio. Please set working directory manually for portability.") 
 }
@@ -89,38 +90,57 @@ tables_path <- file.path(dirname(getwd()), "tables")
 if(!dir.exists(tables_path)) { dir.create(tables_path) }
 message(paste("Tables Directory:", tables_path))
 
+cache_path <- file.path(dirname(getwd()), "cache")
+if(!dir.exists(cache_path)) { dir.create(cache_path) }
+message(paste("Cache Directory:", cache_path))
+
 #-----------------------------------------------------------------------------#
 # DATA IMPORT
 #-----------------------------------------------------------------------------#
 setwd(data_path)
 
 exonLengthsData <- read.delim("MAGNET_exonLengths.txt", header=TRUE, row.names = 1, as.is = T)
-geneExpressionData <- read.delim("MAGNET_GeneExpressionData_CPM_19112020.txt", header=TRUE, row.names = 1, as.is = T)
+geneExpressionData.CPM <- read.delim("MAGNET_GeneExpressionData_CPM_19112020.txt", header=TRUE, row.names = 1, as.is = T)
 sampleDescriptionData <- read_excel("MAGNET_SampleData_18112022_WithDescriptions.xlsx", sheet=2, na="NA")
-sampleDataRaw <- read_excel("MAGNET_SampleData_18112022_WithDescriptions.xlsx", sheet=1, na="NA")
+sampleData.RAW <- read_excel("MAGNET_SampleData_18112022_WithDescriptions.xlsx", sheet=1, na="NA")
 
 setwd(script_path)
 
 # View Imported Data As Simple Quality Check 
 View(exonLengthsData)
-View(geneExpressionData)
+View(geneExpressionData.CPM)
 View(sampleDescriptionData)
-View(sampleDataRaw)
+View(sampleData.RAW)
 
 # Inspect Dimensions, Storage and NAs in Preparation of Preprocessing 
 Hmisc::contents(exonLengthsData)
-Hmisc::contents(geneExpressionData)
-Hmisc::contents(sampleDataRaw)
+Hmisc::contents(geneExpressionData.CPM)
+Hmisc::contents(sampleData.RAW)
 
 # Check for Data Conformance - do Patient-IDs and Gene-IDs match across tables
-all(rownames(geneExpressionData) == rownames(exonLengthsData))
-all(colnames(geneExpressionData) == sampleDataRaw$sample_name)
+all(rownames(geneExpressionData.CPM) == rownames(exonLengthsData))
+all(colnames(geneExpressionData.CPM) == sampleData.RAW$sample_name)
+
+#-----------------------------------------------------------------------------#
+# IMPORT ENSEMBLE DATA
+#-----------------------------------------------------------------------------#
+
+# Import Human Ensembl Dataset
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# Extract Gene Information of Genes in the Expression Data
+geneListInfo <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol", "description", "chromosome_name"),
+  filters = "ensembl_gene_id",,
+  values = rownames(geneExpressionData.CPM),
+  mart = ensembl
+)
 
 #-----------------------------------------------------------------------------#
 # PARTICIPANT INFO DATA - PREPROCESSING
 #-----------------------------------------------------------------------------#
 
-sampleData <- sampleDataRaw
+sampleData <- sampleData.RAW
 
 sampleData.colnames <- colnames(sampleData)
 sampleData.colnames <- gsub("LVEF", "lvef", sampleData.colnames)
@@ -213,7 +233,7 @@ clinicalSampleDataPlot <- ggplot(clinicalSampleData, aes(x = etiology, y = value
 
 ggsave(file.path(plots_path, "clinicalSampleDataPlot.png"), clinicalSampleDataPlot, width = 10, height = 8)
 
-# Violoing Plots -------------------------------------------------------------#
+# Violine Plots -------------------------------------------------------------#
 
 # Age Distribution (Violin Plot per Etiology) 
 violinPlotAgeDistribution <- ggplot(sampleData, aes(x = etiology, y = age, fill = etiology)) +
@@ -333,6 +353,111 @@ ggsave(file.path(plots_path, "densityPlotDataDistribution_etiology_overlap.jpg")
        plot = densityPlotDataDistribution.etiology.overlap, 
        width = 8, height = 6, dpi = 300 )
 
+
+#-----------------------------------------------------------------------------#
+# CPM TO FPKM CONVERSION 
+#-----------------------------------------------------------------------------#
+
+cpm2fpkm <- function(x, y) {
+  .t <- 2^(x) * 1E3 / y[, 1]
+}
+
+# Convert Gene Expression Data from logCPM Values to FPKM Values
+geneExpressionData.FPKM <- cpm2fpkm(geneExpressionData.CPM, exonLengthsData)
+
+#-----------------------------------------------------------------------------#
+# GENE EXPRESSION DATA - BACKGROUND NOISE REMOVAL
+#-----------------------------------------------------------------------------#
+
+annotatedGeneExpressionData.FPKM <- merge(geneExpressionData.FPKM, geneListInfo, by.x="row.names", by="ensembl_gene_id")
+
+geneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM[annotatedGeneExpressionData.FPKM$chromosome_name == "Y",
+                                                    sampleData$gender == "Female", drop=FALSE]
+
+# Create Numerical List of Gene Expression Data of Female Patient Y-Chromosome Genes
+backgroundExpressionData.femaleY <- as.numeric(as.matrix(geneExpressionData.FPKM.femaleY))
+
+backgroundThreshold95PExpressionData <- quantile(backgroundExpressionData.femaleY, 
+                                                 probs=0.95, na.rm=TRUE)
+message(paste("Background Noise 95% Quantile Threshold (FPKM):", round(backgroundThreshold95PExpressionData, 4)))
+
+backgroundThresholdMeanExpressionData <- mean(backgroundExpressionData.femaleY)
+message(paste("Background Noise Mean Threshold (FPKM):", round(backgroundThresholdMeanExpressionData, 4)))
+
+extendedGeneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM.femaleY %>%
+  tibble::rownames_to_column("ensembl_gene_id") %>%
+  pivot_longer(cols=-ensembl_gene_id, names_to="patient", values_to="gene_expression_level") %>%
+  left_join(sampleData, by=c('patient'='sample_name'))
+
+extendedGeneExpressionData.FPKM <- geneExpressionData.FPKM %>%
+  tibble::rownames_to_column("ensembl_gene_id") %>%
+  pivot_longer(cols=-ensembl_gene_id, names_to="patient", values_to="gene_expression_level") %>%
+  left_join(sampleData, by=c('patient'='sample_name'))
+
+# Plot Density Expression Level of Female Patient Y-Chromosome Genes with Threshold 
+noiseExpressionDensityPlot <- ggplot(data=extendedGeneExpressionData.FPKM.femaleY,
+                                     aes(x=log10(gene_expression_level))) +
+  geom_density(fill = npg_colors[2], color = npg_colors[2], alpha = 0.7) +
+  geom_vline(xintercept = log10(backgroundThreshold95PExpressionData), 
+             color = npg_colors[1], linetype = "dashed", linewidth=0.8) +
+  annotate("text", x = log10(backgroundThreshold95PExpressionData), y = 0, 
+           label = "95% Threshold", color = npg_colors[1], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
+  geom_vline(xintercept = log10(backgroundThresholdMeanExpressionData), 
+             color = npg_colors[4], linetype = "dashed", linewidth=0.8) +
+  annotate("text", x = log10(backgroundThresholdMeanExpressionData), y = 0, 
+           label = "Mean Threshold", color = npg_colors[4], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
+  labs(title="Female - Y Chromosome Gene Expression with Threshold", x="Gene Expression Level (FPKM)", y="Density") 
+noiseExpressionDensityPlot
+
+densityPlotDataDistribution.threshold <- ggplot(data = extendedGeneExpressionData.FPKM, 
+                                              aes(x = log10(gene_expression_level))) +
+  geom_density(fill = npg_colors[2], color = npg_colors[2], alpha = 0.7) +
+  geom_vline(xintercept=log10(backgroundThreshold95PExpressionData), 
+             color = npg_colors[1], linetype = "dashed", linewidth=0.8) +
+  annotate("text", x = log10(backgroundThreshold95PExpressionData), y = 0, 
+           label = "95% Threshold", color = npg_colors[1], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
+  geom_vline(xintercept = log10(backgroundThresholdMeanExpressionData), 
+             color = npg_colors[4], linetype = "dashed", linewidth=0.8) +
+  annotate("text", x = log10(backgroundThresholdMeanExpressionData), y = 0, 
+           label = "Mean Threshold", color = npg_colors[4], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
+  labs(title  ="Gene Expression Level Density Plot with Threshold", x="Gene Expression Level (FPKM)",y = "Density")
+densityPlotDataDistribution.threshold
+
+meanGeneExpressionData <- rowMeans(geneExpressionData.FPKM, na.rm=TRUE)
+
+aboveBackground95PThresholdGenes <- meanGeneExpressionData > backgroundThreshold95PExpressionData
+aboveBackgroundMeanThresholdGenes <- meanGeneExpressionData > backgroundThresholdMeanExpressionData
+
+cat("95% Percentile Threshold: ", backgroundThreshold95PExpressionData, "FPKM",
+    "\nNumber of Genes with Expression Level Above or Below the Threshold",
+    "\n - above:", sum(aboveBackground95PThresholdGenes),
+    "\n - below:", sum(!aboveBackground95PThresholdGenes))
+
+cat("Mean Threshold: ", backgroundThresholdMeanExpressionData, "FPKM",
+    "\nNumber of Genes with Expression Level Above or Below the Threshold",
+    "\n - above:", sum(aboveBackgroundMeanThresholdGenes),
+    "\n - below:", sum(!aboveBackgroundMeanThresholdGenes))
+
+geneExpressionData.CPM.95PFiltered <- geneExpressionData.CPM[aboveBackground95PThresholdGenes,]
+geneExpressionData.CPM.meanFiltered <- geneExpressionData.CPM[aboveBackgroundMeanThresholdGenes,]
+
+#-----------------------------------------------------------------------------#
+# DCM PATIENT GENE SET
+#-----------------------------------------------------------------------------#
+
+sampleData.DCM <- subset(sampleData, sampleData$etiology == "DCM")
+geneExpressionData.CPM.DCM <- geneExpressionData.CPM[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name]
+geneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name] 
+geneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name] 
+
+#-----------------------------------------------------------------------------#
+# EXPORT DCM PATIENT GENE SETS
+#-----------------------------------------------------------------------------#
+
+saveRDS(geneExpressionData.CPM.DCM, file.path(cache_path, "geneExpressionData_DCM.rds"))
+saveRDS(geneExpressionData.CPM.95PFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_95PFiltered.rds"))
+saveRDS(geneExpressionData.CPM.meanFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
+
 #-----------------------------------------------------------------------------#
 # GENE EXPRESSION DATA - PRINCIPLE COMPONENT ANALYSIS 
 #-----------------------------------------------------------------------------#
@@ -357,7 +482,7 @@ writeData(workbook, "PCA Loadings", pcaLoadingsDF, rowNames = TRUE)
 
 # Plot Principle Components vs Variance in Data Explained by Component & Sum of Variance
 pcaVarianceExplainedPlot <- ggplot(pcaSummaryDF, aes(x = PC)) +
-  geom_col(aes(y = var*100), fill = npgColors[2], alpha = 0.7, color = npgColors[2]) +   
+  geom_col(aes(y = var*100), fill = npg_colors[2], alpha = 0.7, color = npg_colors[2]) +   
   geom_line(aes(y = var_cum*100, group = 1)) + 
   geom_point(aes(y = var_cum*100)) +
   labs(title="Principle Component vs. Variance Explained",
@@ -415,7 +540,7 @@ scatterVariablePlotPCA.PC1PC2.age <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color
   xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
   ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
   labs(color='Age') +
-  scale_color_gradientn(colors = continuousNPGColors) +
+  scale_color_gradientn(colors = continuousnpg_colors) +
   theme_minimal()
 scatterVariablePlotPCA.PC1PC2.age
 
@@ -444,3 +569,22 @@ scatterVariablePlotPCA.variables <- grid.arrange(scatterVariablePlotPCA.PC1PC2.g
                                                  scatterVariablePlotPCA.PC1PC2.race, 
                                                  scatterVariablePlotPCA.PC1PC2.libraryPool,
                                                  top = "Principle Component Analysis (PC1vsPC2)")
+
+
+
+#-----------------------------------------------------------------------------#
+# DCM PATIENT GENE SET
+#-----------------------------------------------------------------------------#
+
+#-----------------------------------------------------------------------------#
+# SYSTEM-SPECIFIC GENE SET - IMMUNE
+#-----------------------------------------------------------------------------#
+
+#-----------------------------------------------------------------------------#
+# SYSTEM-SPECIFIC GENE SET - HORMONAL 
+#-----------------------------------------------------------------------------#
+
+#-----------------------------------------------------------------------------#
+# SYSTEM-SPECIFIC GENE SET - CARDIOVASCULAR 
+#-----------------------------------------------------------------------------#
+
