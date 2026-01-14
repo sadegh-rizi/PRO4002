@@ -2,101 +2,29 @@
 ###############################################################################
 # PRO4002 Research Project                                                    #
 #																	                                            #
+# File: 001_QualityControl.R                                                  #
 # Date: Jan 22, 2026											                                    #
 # Author: Sadegh, Matas, Nur, Arlin & Oona                                    #  
 ###############################################################################
 ###############################################################################
 
 #-----------------------------------------------------------------------------#
-# LIBRARY/PACKAGE INSTALLATION
-#-----------------------------------------------------------------------------#
-
-analysis_packages <- c( 
-  "tidyverse", "tidyr", "dplyr", "gridExtra", "pcaMethods",
-  "data.table", "tableone", "kableExtra", "rmarkdown",
-  "readr", "readxl", "gprofiler2", "knitr", "Hmisc", "table1",
-  "gt", "gtsummary", "ggsci", "DESeq2", "edgeR"
-)
-
-bio_packages <- c("limma", "qvalue", "biomaRt", "Biocmanager")
-
-for (pkg in analysis_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    message(paste("Installing Analysis package:", pkg))
-    install.packages(pkg, dependencies = TRUE)
-  }
-  library(pkg, character.only = TRUE)
-}
-
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
-}
-
-for (pkg in bio_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    message(paste("Installing Bioconductor package:", pkg))
-    BiocManager::install(pkg)
-  }
-  library(pkg, character.only = TRUE)
-}
-
-search()
-
-#-----------------------------------------------------------------------------#
-# STYLE SETUP
-#-----------------------------------------------------------------------------#
-
-# Prepare Color Values to Match Nature Color Scheme
-npg_colors <- pal_npg("nrc", alpha = 1)(10)
-npg_additional_colors <- colorRampPalette(npg_colors)(20)
-continuous_npg_colors <- colorRampPalette(c(npg_colors[2], "white"))(100)
-
-# GGplot Plotting Settings 
-center_title <- theme(plot.title = element_text(hjust = 0.5, vjust = 1))
-
-target_font <- "sans" 
-my_style <- theme(
-  text = element_text(family = target_font),        
-  plot.title = element_text(hjust = 0.5, face="bold"),
-  axis.title = element_text(face = "bold"),    
-  legend.position = "right"                    
-)
-
-
-#-----------------------------------------------------------------------------#
 # SETUP
 #-----------------------------------------------------------------------------#
 
-if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) { 
-  script_path <- dirname(rstudioapi::getActiveDocumentContext()$path)
-  setwd(script_path)
-} else {
-  warning("Not running in RStudio. Please set working directory manually for portability.") 
-}
+source(here::here("scripts", "000_setup.R"))
 
-data_path <- file.path(dirname(getwd()), "data")
-if(!dir.exists(data_path)) { dir.create(data_path) }
-message(paste("Data Directory:", data_path))
+quality_control_path <- file.path(plots_path, "QualityControl")
+if(!dir.exists(quality_control_path)) dir.create(quality_control_path, recursive = TRUE)
 
-plots_path <- file.path(dirname(getwd()), "plots")
-if(!dir.exists(plots_path)) { dir.create(plots_path) }
-message(paste("Plots Directory:", plots_path))
-
-results_path <- file.path(dirname(getwd()), "results")
-if(!dir.exists(results_path)) { dir.create(results_path) }
-message(paste("Results Directory:", results_path))
-
-tables_path <- file.path(dirname(getwd()), "tables")
-if(!dir.exists(tables_path)) { dir.create(tables_path) }
-message(paste("Tables Directory:", tables_path))
-
-cache_path <- file.path(dirname(getwd()), "cache")
-if(!dir.exists(cache_path)) { dir.create(cache_path) }
-message(paste("Cache Directory:", cache_path))
+message("\n--- Starting Quality Control ---")
 
 #-----------------------------------------------------------------------------#
 # DATA IMPORT
 #-----------------------------------------------------------------------------#
+
+message("(I) Data Import ")
+
 setwd(data_path)
 
 exonLengthsData <- read.delim("MAGNET_exonLengths.txt", header=TRUE, row.names = 1, as.is = T)
@@ -139,6 +67,8 @@ geneListInfo <- getBM(
 #-----------------------------------------------------------------------------#
 # PARTICIPANT INFO DATA - PREPROCESSING
 #-----------------------------------------------------------------------------#
+
+message("(II) Participant Data - Analysis")
 
 sampleData <- sampleData.RAW
 
@@ -187,6 +117,9 @@ demoTableStrata <- c(list(Total=sampleData), split(sampleData, sampleData$etiolo
 demographicTable <- table1(demoTableStrata, demoTableLabels, 
                            footnote=demoTableFootnote, topclass="Rtable1-zebra")
 
+save_html(demographicTable, file.path(tables_path, "demographicTable.html"))
+demographicTable
+
 #-----------------------------------------------------------------------------#
 # PARTICIPANT INFO DATA - CLINICAL CHARACTERISTICS BOXPLOT
 #-----------------------------------------------------------------------------#
@@ -231,7 +164,7 @@ clinicalSampleDataPlot <- ggplot(clinicalSampleData, aes(x = etiology, y = value
   ) +
   center_title + my_style
 
-ggsave(file.path(plots_path, "clinicalSampleDataPlot.png"), clinicalSampleDataPlot, width = 10, height = 8)
+ggsave(file.path(quality_control_path, "clinicalSampleDataPlot.jpg"), clinicalSampleDataPlot, width = 10, height = 8)
 
 # Violine Plots -------------------------------------------------------------#
 
@@ -246,7 +179,7 @@ violinPlotAgeDistribution <- ggplot(sampleData, aes(x = etiology, y = age, fill 
   center_title + my_style +
   theme(legend.position="none")  
 
-ggsave(file.path(plots_path, "violinPlotAgeDistribution.jpg"), 
+ggsave(file.path(quality_control_path, "violinPlotAgeDistribution.jpg"), 
        plot = violinPlotAgeDistribution, 
        width = 6, height = 4)
 
@@ -261,7 +194,7 @@ violinPlotRINDistribution <- ggplot(sampleData, aes(x = etiology, y = rin, fill 
   center_title + my_style +
   theme(legend.position="none")  
 
-ggsave(file.path(plots_path, "violinPlotRINDistribution.jpg"), 
+ggsave(file.path(quality_control_path, "violinPlotRINDistribution.jpg"), 
        plot = violinPlotRINDistribution, 
        width = 6, height = 4)
 
@@ -269,7 +202,9 @@ ggsave(file.path(plots_path, "violinPlotRINDistribution.jpg"),
 # GENE EXPRESSION DATA - DATA DISTRIBUTION 
 #-----------------------------------------------------------------------------#
 
-extendedGeneExpressionData <- geneExpressionData %>%
+message("(III) Gene Expression Data - Analysis")
+
+extendedGeneExpressionData <- geneExpressionData.CPM %>%
   tibble::rownames_to_column("gene") %>%
   pivot_longer(cols=-gene, names_to="patient", values_to="gene_expression_level") %>%
   left_join(sampleData, by=c('patient'='sample_name'))
@@ -294,7 +229,7 @@ boxPlotDataDistribution.etiology.grid <- ggplot(data = extendedGeneExpressionDat
     ) +
   center_title + my_style
 
-ggsave(file.path(plots_path, "boxPlotDataDistribution_etiology_grid.jpg"), 
+ggsave(file.path(quality_control_path, "boxPlotDataDistribution_etiology_grid.jpg"), 
        plot = boxPlotDataDistribution.etiology.grid, 
        width = 8, height = 6, dpi = 300)
 
@@ -316,7 +251,7 @@ boxPlotDataDistribution.etiology.inline <- ggplot(data = extendedGeneExpressionD
     ) +
   center_title + my_style
 
-ggsave(file.path(plots_path, "boxPlotDataDistribution_etiology_inline.jpg"), 
+ggsave(file.path(quality_control_path, "boxPlotDataDistribution_etiology_inline.jpg"), 
        plot = boxPlotDataDistribution.etiology.inline,
        width = 20, height = 8 )
 
@@ -334,7 +269,7 @@ densityPlotDataDistribution.etiology.grid <- ggplot(data = extendedGeneExpressio
   facet_wrap(~etiology, scales="free_x") +
   center_title + my_style
 
-ggsave(file.path(plots_path, "densityPlotDataDistribution_etiology_grid.jpg"), 
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_etiology_grid.jpg"), 
        plot = densityPlotDataDistribution.etiology.grid, 
        width = 8, height = 6, dpi = 300 )
 
@@ -349,7 +284,7 @@ densityPlotDataDistribution.etiology.overlap <- ggplot(data = extendedGeneExpres
   scale_fill_npg() +
   center_title + my_style
 
-ggsave(file.path(plots_path, "densityPlotDataDistribution_etiology_overlap.jpg"), 
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_etiology_overlap.jpg"), 
        plot = densityPlotDataDistribution.etiology.overlap, 
        width = 8, height = 6, dpi = 300 )
 
@@ -369,6 +304,8 @@ geneExpressionData.FPKM <- cpm2fpkm(geneExpressionData.CPM, exonLengthsData)
 # GENE EXPRESSION DATA - BACKGROUND NOISE REMOVAL
 #-----------------------------------------------------------------------------#
 
+message("(IV) Gene Expression Data - Background Noise Removal ")
+
 annotatedGeneExpressionData.FPKM <- merge(geneExpressionData.FPKM, geneListInfo, by.x="row.names", by="ensembl_gene_id")
 
 geneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM[annotatedGeneExpressionData.FPKM$chromosome_name == "Y",
@@ -379,10 +316,8 @@ backgroundExpressionData.femaleY <- as.numeric(as.matrix(geneExpressionData.FPKM
 
 backgroundThreshold95PExpressionData <- quantile(backgroundExpressionData.femaleY, 
                                                  probs=0.95, na.rm=TRUE)
-message(paste("Background Noise 95% Quantile Threshold (FPKM):", round(backgroundThreshold95PExpressionData, 4)))
 
 backgroundThresholdMeanExpressionData <- mean(backgroundExpressionData.femaleY)
-message(paste("Background Noise Mean Threshold (FPKM):", round(backgroundThresholdMeanExpressionData, 4)))
 
 extendedGeneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM.femaleY %>%
   tibble::rownames_to_column("ensembl_gene_id") %>%
@@ -428,15 +363,15 @@ meanGeneExpressionData <- rowMeans(geneExpressionData.FPKM, na.rm=TRUE)
 aboveBackground95PThresholdGenes <- meanGeneExpressionData > backgroundThreshold95PExpressionData
 aboveBackgroundMeanThresholdGenes <- meanGeneExpressionData > backgroundThresholdMeanExpressionData
 
-cat("95% Percentile Threshold: ", backgroundThreshold95PExpressionData, "FPKM",
-    "\nNumber of Genes with Expression Level Above or Below the Threshold",
-    "\n - above:", sum(aboveBackground95PThresholdGenes),
-    "\n - below:", sum(!aboveBackground95PThresholdGenes))
+message("  95% Percentile Threshold: ", backgroundThreshold95PExpressionData, "FPKM",
+  "\n  Number of Genes with Expression Level Above or Below the Threshold",
+  "\n   - above: ", sum(aboveBackground95PThresholdGenes),
+  "\n   - below: ", sum(!aboveBackground95PThresholdGenes))
 
-cat("Mean Threshold: ", backgroundThresholdMeanExpressionData, "FPKM",
-    "\nNumber of Genes with Expression Level Above or Below the Threshold",
-    "\n - above:", sum(aboveBackgroundMeanThresholdGenes),
-    "\n - below:", sum(!aboveBackgroundMeanThresholdGenes))
+message("  Mean Threshold: ", backgroundThresholdMeanExpressionData, "FPKM",
+  "\n  Number of Genes with Expression Level Above or Below the Threshold",
+  "\n   - above: ", sum(aboveBackgroundMeanThresholdGenes),
+  "\n   - below: ", sum(!aboveBackgroundMeanThresholdGenes))
 
 geneExpressionData.CPM.95PFiltered <- geneExpressionData.CPM[aboveBackground95PThresholdGenes,]
 geneExpressionData.CPM.meanFiltered <- geneExpressionData.CPM[aboveBackgroundMeanThresholdGenes,]
@@ -445,20 +380,14 @@ geneExpressionData.CPM.meanFiltered <- geneExpressionData.CPM[aboveBackgroundMea
 # DCM PATIENT GENE SET
 #-----------------------------------------------------------------------------#
 
+message("(V) DCM Patient Dataset - Creation & Analysis")
+
 sampleData.DCM <- subset(sampleData, sampleData$etiology == "DCM")
 geneExpressionData.CPM.DCM <- geneExpressionData.CPM[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name]
 geneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered[, 
   colnames(geneExpressionData.CPM.95PFiltered) %in% sampleData.DCM$sample_name] 
 geneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered[, 
   colnames(geneExpressionData.CPM.meanFiltered) %in% sampleData.DCM$sample_name] 
-
-#-----------------------------------------------------------------------------#
-# EXPORT DCM PATIENT GENE SETS
-#-----------------------------------------------------------------------------#
-
-saveRDS(geneExpressionData.CPM.DCM, file.path(cache_path, "geneExpressionData_DCM.rds"))
-saveRDS(geneExpressionData.CPM.95PFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_95PFiltered.rds"))
-saveRDS(geneExpressionData.CPM.meanFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
 
 #-----------------------------------------------------------------------------#
 # DCM PATIENT GENE SET - DENSITY PLOTs
@@ -478,7 +407,7 @@ densityPlotDataDistribution.meanFiltered.DCM <- ggplot(data = extendedGeneExpres
   scale_fill_npg() +
   center_title + my_style
 
-ggsave(file.path(plots_path, "densityPlotDataDistribution_meanFiltered_DCM.jpg"), 
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_meanFiltered_DCM.jpg"), 
        plot = densityPlotDataDistribution.meanFiltered.DCM, 
        width = 8, height = 6, dpi = 300 )
 
@@ -496,13 +425,27 @@ densityPlotDataDistribution.95PFiltered.DCM <- ggplot(data = extendedGeneExpress
   scale_fill_npg() +
   center_title + my_style
 
-ggsave(file.path(plots_path, "densityPlotDataDistribution_95PFiltered_DCM.jpg"), 
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_95PFiltered_DCM.jpg"), 
        plot = densityPlotDataDistribution.95PFiltered.DCM, 
        width = 8, height = 6, dpi = 300 )
 
 #-----------------------------------------------------------------------------#
+# EXPORT DCM PATIENT GENE SETS
+#-----------------------------------------------------------------------------#
+
+message("(VI) Export RDS files ")
+
+saveRDS(geneListInfo, file.path(cache_path, "geneListInfo.rds"))
+saveRDS(sampleData.DCM, file.path(cache_path, "sampleData_DCM.rds"))
+saveRDS(geneExpressionData.CPM.DCM, file.path(cache_path, "geneExpressionData_DCM.rds"))
+saveRDS(geneExpressionData.CPM.95PFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_95PFiltered.rds"))
+saveRDS(geneExpressionData.CPM.meanFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
+
+#-----------------------------------------------------------------------------#
 # SYSTEM-SPECIFIC GENE SET - IMMUNE
 #-----------------------------------------------------------------------------#
+
+message("(VII) Immune System-Specifc Gene Dataset - Creation & Export")
 
 innateDB.RAW <- read.csv(file.path(data_path, "InnateDB_genes.csv"), header=TRUE, na="NA")
 innateDB <- subset(innateDB.RAW, innateDB.RAW$species == "Homo sapiens")
@@ -513,3 +456,9 @@ geneExpressionData.CPM.meanFiltered.DCM.INNATE <- geneExpressionData.CPM.meanFil
 
 saveRDS(geneExpressionData.CPM.DCM.INNATE, file.path(cache_path, "geneExpressionData_DCM_INNATE.rds"))
 saveRDS(geneExpressionData.CPM.meanFiltered.DCM.INNATE, file.path(cache_path, "geneExpressionData_DCM_meanFiltered_INNATE.rds"))
+
+#-----------------------------------------------------------------------------#
+# COMPLETE
+#-----------------------------------------------------------------------------#
+
+message("--- Finished Quality Control ---")
