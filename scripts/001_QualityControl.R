@@ -2,101 +2,29 @@
 ###############################################################################
 # PRO4002 Research Project                                                    #
 #																	                                            #
+# File: 001_QualityControl.R                                                  #
 # Date: Jan 22, 2026											                                    #
 # Author: Sadegh, Matas, Nur, Arlin & Oona                                    #  
 ###############################################################################
 ###############################################################################
 
 #-----------------------------------------------------------------------------#
-# LIBRARY/PACKAGE INSTALLATION
-#-----------------------------------------------------------------------------#
-
-analysis_packages <- c( 
-  "tidyverse", "tidyr", "dplyr", "gridExtra", "pcaMethods",
-  "data.table", "tableone", "kableExtra", "rmarkdown",
-  "readr", "readxl", "gprofiler2", "knitr", "Hmisc", "table1",
-  "gt", "gtsummary", "ggsci", "DESeq2", "edgeR"
-)
-
-bio_packages <- c("limma", "qvalue", "biomaRt", "Biocmanager")
-
-for (pkg in analysis_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    message(paste("Installing Analysis package:", pkg))
-    install.packages(pkg, dependencies = TRUE)
-  }
-  library(pkg, character.only = TRUE)
-}
-
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
-}
-
-for (pkg in bio_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    message(paste("Installing Bioconductor package:", pkg))
-    BiocManager::install(pkg)
-  }
-  library(pkg, character.only = TRUE)
-}
-
-search()
-
-#-----------------------------------------------------------------------------#
-# STYLE SETUP
-#-----------------------------------------------------------------------------#
-
-# Prepare Color Values to Match Nature Color Scheme
-npg_colors <- pal_npg("nrc", alpha = 1)(10)
-npg_additional_colors <- colorRampPalette(npg_colors)(20)
-continuous_npg_colors <- colorRampPalette(c(npg_colors[2], "white"))(100)
-
-# GGplot Plotting Settings 
-center_title <- theme(plot.title = element_text(hjust = 0.5, vjust = 1))
-
-target_font <- "sans" 
-my_style <- theme(
-  text = element_text(family = target_font),        
-  plot.title = element_text(hjust = 0.5, face="bold"),
-  axis.title = element_text(face = "bold"),    
-  legend.position = "right"                    
-)
-
-
-#-----------------------------------------------------------------------------#
 # SETUP
 #-----------------------------------------------------------------------------#
 
-if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) { 
-  script_path <- dirname(rstudioapi::getActiveDocumentContext()$path)
-  setwd(script_path)
-} else {
-  warning("Not running in RStudio. Please set working directory manually for portability.") 
-}
+source(here::here("scripts", "000_setup.R"))
 
-data_path <- file.path(dirname(getwd()), "data")
-if(!dir.exists(data_path)) { dir.create(data_path) }
-message(paste("Data Directory:", data_path))
+quality_control_path <- file.path(plots_path, "QualityControl")
+if(!dir.exists(quality_control_path)) dir.create(quality_control_path, recursive = TRUE)
 
-plots_path <- file.path(dirname(getwd()), "plots")
-if(!dir.exists(plots_path)) { dir.create(plots_path) }
-message(paste("Plots Directory:", plots_path))
-
-results_path <- file.path(dirname(getwd()), "results")
-if(!dir.exists(results_path)) { dir.create(results_path) }
-message(paste("Results Directory:", results_path))
-
-tables_path <- file.path(dirname(getwd()), "tables")
-if(!dir.exists(tables_path)) { dir.create(tables_path) }
-message(paste("Tables Directory:", tables_path))
-
-cache_path <- file.path(dirname(getwd()), "cache")
-if(!dir.exists(cache_path)) { dir.create(cache_path) }
-message(paste("Cache Directory:", cache_path))
+message("\n--- Starting Quality Control ---")
 
 #-----------------------------------------------------------------------------#
 # DATA IMPORT
 #-----------------------------------------------------------------------------#
+
+message("(I) Data Import ")
+
 setwd(data_path)
 
 exonLengthsData <- read.delim("MAGNET_exonLengths.txt", header=TRUE, row.names = 1, as.is = T)
@@ -139,6 +67,8 @@ geneListInfo <- getBM(
 #-----------------------------------------------------------------------------#
 # PARTICIPANT INFO DATA - PREPROCESSING
 #-----------------------------------------------------------------------------#
+
+message("(II) Participant Data - Analysis")
 
 sampleData <- sampleData.RAW
 
@@ -187,6 +117,9 @@ demoTableStrata <- c(list(Total=sampleData), split(sampleData, sampleData$etiolo
 demographicTable <- table1(demoTableStrata, demoTableLabels, 
                            footnote=demoTableFootnote, topclass="Rtable1-zebra")
 
+save_html(demographicTable, file.path(tables_path, "demographicTable.html"))
+demographicTable
+
 #-----------------------------------------------------------------------------#
 # PARTICIPANT INFO DATA - CLINICAL CHARACTERISTICS BOXPLOT
 #-----------------------------------------------------------------------------#
@@ -231,7 +164,7 @@ clinicalSampleDataPlot <- ggplot(clinicalSampleData, aes(x = etiology, y = value
   ) +
   center_title + my_style
 
-ggsave(file.path(plots_path, "clinicalSampleDataPlot.png"), clinicalSampleDataPlot, width = 10, height = 8)
+ggsave(file.path(quality_control_path, "clinicalSampleDataPlot.jpg"), clinicalSampleDataPlot, width = 10, height = 8)
 
 # Violine Plots -------------------------------------------------------------#
 
@@ -246,7 +179,7 @@ violinPlotAgeDistribution <- ggplot(sampleData, aes(x = etiology, y = age, fill 
   center_title + my_style +
   theme(legend.position="none")  
 
-ggsave(file.path(plots_path, "violinPlotAgeDistribution.jpg"), 
+ggsave(file.path(quality_control_path, "violinPlotAgeDistribution.jpg"), 
        plot = violinPlotAgeDistribution, 
        width = 6, height = 4)
 
@@ -261,7 +194,7 @@ violinPlotRINDistribution <- ggplot(sampleData, aes(x = etiology, y = rin, fill 
   center_title + my_style +
   theme(legend.position="none")  
 
-ggsave(file.path(plots_path, "violinPlotRINDistribution.jpg"), 
+ggsave(file.path(quality_control_path, "violinPlotRINDistribution.jpg"), 
        plot = violinPlotRINDistribution, 
        width = 6, height = 4)
 
@@ -269,7 +202,9 @@ ggsave(file.path(plots_path, "violinPlotRINDistribution.jpg"),
 # GENE EXPRESSION DATA - DATA DISTRIBUTION 
 #-----------------------------------------------------------------------------#
 
-extendedGeneExpressionData <- geneExpressionData %>%
+message("(III) Gene Expression Data - Analysis")
+
+extendedGeneExpressionData <- geneExpressionData.CPM %>%
   tibble::rownames_to_column("gene") %>%
   pivot_longer(cols=-gene, names_to="patient", values_to="gene_expression_level") %>%
   left_join(sampleData, by=c('patient'='sample_name'))
@@ -294,7 +229,7 @@ boxPlotDataDistribution.etiology.grid <- ggplot(data = extendedGeneExpressionDat
     ) +
   center_title + my_style
 
-ggsave(file.path(plots_path, "boxPlotDataDistribution_etiology_grid.jpg"), 
+ggsave(file.path(quality_control_path, "boxPlotDataDistribution_etiology_grid.jpg"), 
        plot = boxPlotDataDistribution.etiology.grid, 
        width = 8, height = 6, dpi = 300)
 
@@ -316,7 +251,7 @@ boxPlotDataDistribution.etiology.inline <- ggplot(data = extendedGeneExpressionD
     ) +
   center_title + my_style
 
-ggsave(file.path(plots_path, "boxPlotDataDistribution_etiology_inline.jpg"), 
+ggsave(file.path(quality_control_path, "boxPlotDataDistribution_etiology_inline.jpg"), 
        plot = boxPlotDataDistribution.etiology.inline,
        width = 20, height = 8 )
 
@@ -334,7 +269,7 @@ densityPlotDataDistribution.etiology.grid <- ggplot(data = extendedGeneExpressio
   facet_wrap(~etiology, scales="free_x") +
   center_title + my_style
 
-ggsave(file.path(plots_path, "densityPlotDataDistribution_etiology_grid.jpg"), 
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_etiology_grid.jpg"), 
        plot = densityPlotDataDistribution.etiology.grid, 
        width = 8, height = 6, dpi = 300 )
 
@@ -349,7 +284,7 @@ densityPlotDataDistribution.etiology.overlap <- ggplot(data = extendedGeneExpres
   scale_fill_npg() +
   center_title + my_style
 
-ggsave(file.path(plots_path, "densityPlotDataDistribution_etiology_overlap.jpg"), 
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_etiology_overlap.jpg"), 
        plot = densityPlotDataDistribution.etiology.overlap, 
        width = 8, height = 6, dpi = 300 )
 
@@ -369,6 +304,8 @@ geneExpressionData.FPKM <- cpm2fpkm(geneExpressionData.CPM, exonLengthsData)
 # GENE EXPRESSION DATA - BACKGROUND NOISE REMOVAL
 #-----------------------------------------------------------------------------#
 
+message("(IV) Gene Expression Data - Background Noise Removal ")
+
 annotatedGeneExpressionData.FPKM <- merge(geneExpressionData.FPKM, geneListInfo, by.x="row.names", by="ensembl_gene_id")
 
 geneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM[annotatedGeneExpressionData.FPKM$chromosome_name == "Y",
@@ -379,10 +316,8 @@ backgroundExpressionData.femaleY <- as.numeric(as.matrix(geneExpressionData.FPKM
 
 backgroundThreshold95PExpressionData <- quantile(backgroundExpressionData.femaleY, 
                                                  probs=0.95, na.rm=TRUE)
-message(paste("Background Noise 95% Quantile Threshold (FPKM):", round(backgroundThreshold95PExpressionData, 4)))
 
 backgroundThresholdMeanExpressionData <- mean(backgroundExpressionData.femaleY)
-message(paste("Background Noise Mean Threshold (FPKM):", round(backgroundThresholdMeanExpressionData, 4)))
 
 extendedGeneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM.femaleY %>%
   tibble::rownames_to_column("ensembl_gene_id") %>%
@@ -428,15 +363,15 @@ meanGeneExpressionData <- rowMeans(geneExpressionData.FPKM, na.rm=TRUE)
 aboveBackground95PThresholdGenes <- meanGeneExpressionData > backgroundThreshold95PExpressionData
 aboveBackgroundMeanThresholdGenes <- meanGeneExpressionData > backgroundThresholdMeanExpressionData
 
-cat("95% Percentile Threshold: ", backgroundThreshold95PExpressionData, "FPKM",
-    "\nNumber of Genes with Expression Level Above or Below the Threshold",
-    "\n - above:", sum(aboveBackground95PThresholdGenes),
-    "\n - below:", sum(!aboveBackground95PThresholdGenes))
+message("  95% Percentile Threshold: ", backgroundThreshold95PExpressionData, "FPKM",
+  "\n  Number of Genes with Expression Level Above or Below the Threshold",
+  "\n   - above: ", sum(aboveBackground95PThresholdGenes),
+  "\n   - below: ", sum(!aboveBackground95PThresholdGenes))
 
-cat("Mean Threshold: ", backgroundThresholdMeanExpressionData, "FPKM",
-    "\nNumber of Genes with Expression Level Above or Below the Threshold",
-    "\n - above:", sum(aboveBackgroundMeanThresholdGenes),
-    "\n - below:", sum(!aboveBackgroundMeanThresholdGenes))
+message("  Mean Threshold: ", backgroundThresholdMeanExpressionData, "FPKM",
+  "\n  Number of Genes with Expression Level Above or Below the Threshold",
+  "\n   - above: ", sum(aboveBackgroundMeanThresholdGenes),
+  "\n   - below: ", sum(!aboveBackgroundMeanThresholdGenes))
 
 geneExpressionData.CPM.95PFiltered <- geneExpressionData.CPM[aboveBackground95PThresholdGenes,]
 geneExpressionData.CPM.meanFiltered <- geneExpressionData.CPM[aboveBackgroundMeanThresholdGenes,]
@@ -445,146 +380,85 @@ geneExpressionData.CPM.meanFiltered <- geneExpressionData.CPM[aboveBackgroundMea
 # DCM PATIENT GENE SET
 #-----------------------------------------------------------------------------#
 
+message("(V) DCM Patient Dataset - Creation & Analysis")
+
 sampleData.DCM <- subset(sampleData, sampleData$etiology == "DCM")
 geneExpressionData.CPM.DCM <- geneExpressionData.CPM[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name]
-geneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name] 
-geneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name] 
+geneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered[, 
+  colnames(geneExpressionData.CPM.95PFiltered) %in% sampleData.DCM$sample_name] 
+geneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered[, 
+  colnames(geneExpressionData.CPM.meanFiltered) %in% sampleData.DCM$sample_name] 
+
+#-----------------------------------------------------------------------------#
+# DCM PATIENT GENE SET - DENSITY PLOTs
+#-----------------------------------------------------------------------------#
+
+extendedGeneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered.DCM %>%
+  tibble::rownames_to_column("gene") %>%
+  pivot_longer(cols=-gene, names_to="patient", values_to="gene_expression_level") %>%
+  left_join(sampleData, by=c('patient'='sample_name'))
+
+# Data Distribution 
+densityPlotDataDistribution.meanFiltered.DCM <- ggplot(data = extendedGeneExpressionData.CPM.meanFiltered.DCM, 
+  aes(x = gene_expression_level)) +
+  geom_density(alpha=0.7, fill=npg_colors[[1]]) +
+  labs(title="Gene Expression Level Density Plot", x="Gene Expression Level (logCPM)", y="Density") +
+  scale_color_npg() +
+  scale_fill_npg() +
+  center_title + my_style
+
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_meanFiltered_DCM.jpg"), 
+       plot = densityPlotDataDistribution.meanFiltered.DCM, 
+       width = 8, height = 6, dpi = 300 )
+
+extendedGeneExpressionData.CPM.95PFiltered.DCM <- geneExpressionData.CPM.95PFiltered.DCM %>%
+  tibble::rownames_to_column("gene") %>%
+  pivot_longer(cols=-gene, names_to="patient", values_to="gene_expression_level") %>%
+  left_join(sampleData, by=c('patient'='sample_name'))
+
+# Data Distribution 
+densityPlotDataDistribution.95PFiltered.DCM <- ggplot(data = extendedGeneExpressionData.CPM.95PFiltered.DCM, 
+  aes(x = gene_expression_level)) +
+  geom_density(alpha=0.7, fill=npg_colors[[1]]) +
+  labs(title="Gene Expression Level Density Plot", x="Gene Expression Level (logCPM)", y="Density") +
+  scale_color_npg() +
+  scale_fill_npg() +
+  center_title + my_style
+
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_95PFiltered_DCM.jpg"), 
+       plot = densityPlotDataDistribution.95PFiltered.DCM, 
+       width = 8, height = 6, dpi = 300 )
 
 #-----------------------------------------------------------------------------#
 # EXPORT DCM PATIENT GENE SETS
 #-----------------------------------------------------------------------------#
 
+message("(VI) Export RDS files ")
+
+saveRDS(geneListInfo, file.path(cache_path, "geneListInfo.rds"))
+saveRDS(sampleData.DCM, file.path(cache_path, "sampleData_DCM.rds"))
 saveRDS(geneExpressionData.CPM.DCM, file.path(cache_path, "geneExpressionData_DCM.rds"))
 saveRDS(geneExpressionData.CPM.95PFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_95PFiltered.rds"))
 saveRDS(geneExpressionData.CPM.meanFiltered.DCM, file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
 
 #-----------------------------------------------------------------------------#
-# GENE EXPRESSION DATA - PRINCIPLE COMPONENT ANALYSIS 
-#-----------------------------------------------------------------------------#
-
-# Performing a PCA on the Gene Expression Data - specified to compute 10 principle components
-pcaGeneExpressionData <- pca(t(geneExpressionData), nPcs = 10)
-summary(pcaGeneExpressionData)
-
-# Create Data Frame with Summary of PCA 
-pcaSummaryDF <- data.frame(PC = paste0("PC",factor(1:pcaGeneExpressionData@nPcs)), 
-                                     var = pcaGeneExpressionData@R2, var_cum=pcaGeneExpressionData@R2cum)
-pcaScoresDF <- scores(pcaGeneExpressionData)
-pcaLoadingsDF <- loadings(pcaGeneExpressionData)
-
-# Add PCA Data Frame To Excel File 
-addWorksheet(workbook, "PCA Summary")
-writeData(workbook, "PCA Summary", pcaSummaryDF)
-addWorksheet(workbook, "PCA Scores")
-writeData(workbook, "PCA Scores", pcaScoresDF, rowNames = TRUE)
-addWorksheet(workbook, "PCA Loadings")
-writeData(workbook, "PCA Loadings", pcaLoadingsDF, rowNames = TRUE)
-
-# Plot Principle Components vs Variance in Data Explained by Component & Sum of Variance
-pcaVarianceExplainedPlot <- ggplot(pcaSummaryDF, aes(x = PC)) +
-  geom_col(aes(y = var*100), fill = npg_colors[2], alpha = 0.7, color = npg_colors[2]) +   
-  geom_line(aes(y = var_cum*100, group = 1)) + 
-  geom_point(aes(y = var_cum*100)) +
-  labs(title="Principle Component vs. Variance Explained",
-       x = "Principal Component", y = "Percentage of Variance Explained (%)") +
-  theme_minimal()
-pcaVarianceExplainedPlot
-
-# Combining Principle Components with the Corresponding Sample Data
-pcaSampleInfoDF <- cbind(scores(pcaGeneExpressionData), sampleData)
-
-# Plot PCA Results (PC1 vs PC2 & PC3 vs PC4)
-scatterVariablePlotPCA.PC1PC2 <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color=etiology)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(title="PC1 vs. PC2", color='Etiology') +
-  scale_color_npg() +
-  scale_fill_npg() +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2
-
-scatterVariablePlotPCA.PC3PC4 <- ggplot(pcaSampleInfoDF, aes(PC3, PC4, color = etiology)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC3 (", pcaGeneExpressionData@R2[3] * 100, "% of the variance)")) +
-  ylab(paste("PC4 (", pcaGeneExpressionData@R2[4] * 100, "% of the variance)")) +
-  labs(title="PC3 vs. PC4", color='Etiology') +
-  scale_color_npg() +
-  scale_fill_npg() +
-  theme_minimal()
-scatterVariablePlotPCA.PC3PC4
-
-# Combine Both PCA Plots into Single Image
-sharedLegendPlotPCA <- get_legend(scatterVariablePlotPCA.PC1PC2)
-scatterVariablePlotPCA.PC1PC2 <- scatterVariablePlotPCA.PC1PC2 + theme(legend.position = "none")
-scatterVariablePlotPCA.PC3PC4 <- scatterVariablePlotPCA.PC3PC4 + theme(legend.position = "none")
-scatterVariablePlotPCA.combined <- grid.arrange(arrangeGrob(scatterVariablePlotPCA.PC1PC2, 
-                                                            scatterVariablePlotPCA.PC3PC4, 
-                                                            nrow = 1), 
-                                                sharedLegendPlotPCA,
-                                                ncol = 2, widths = c(8,1),
-                                                top = "Principle Component Analysis")
-
-# Plot PCA Results (PC1 vs PC2) vs Gender, Age, Race & Library.Pool
-scatterVariablePlotPCA.PC1PC2.gender <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color = gender)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Gender') +
-  scale_color_manual(values = npgAdditionalColors) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.gender
-
-scatterVariablePlotPCA.PC1PC2.age <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color = age)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Age') +
-  scale_color_gradientn(colors = continuousnpg_colors) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.age
-
-scatterVariablePlotPCA.PC1PC2.race <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color=race)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Race') +
-  scale_color_manual(values = npgAdditionalColors) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.race
-
-scatterVariablePlotPCA.PC1PC2.libraryPool <- ggplot(pcaSampleInfoDF, aes(PC1, PC2, color=Library.Pool)) +
-  geom_point(alpha=0.8) +
-  xlab(paste("PC1 (", pcaGeneExpressionData@R2[1] * 100, "% of the variance)")) +
-  ylab(paste("PC2 (", pcaGeneExpressionData@R2[2] * 100, "% of the variance)")) +
-  labs(color='Library.Pool') +
-  scale_color_manual(values = npgAdditionalColors) +
-  stat_ellipse(aes(color = Library.Pool)) +
-  theme_minimal()
-scatterVariablePlotPCA.PC1PC2.libraryPool
-
-# Combine Four PC1vsPC2 Plots into Single Image
-scatterVariablePlotPCA.variables <- grid.arrange(scatterVariablePlotPCA.PC1PC2.gender, 
-                                                 scatterVariablePlotPCA.PC1PC2.age,
-                                                 scatterVariablePlotPCA.PC1PC2.race, 
-                                                 scatterVariablePlotPCA.PC1PC2.libraryPool,
-                                                 top = "Principle Component Analysis (PC1vsPC2)")
-
-
-
-#-----------------------------------------------------------------------------#
-# DCM PATIENT GENE SET
-#-----------------------------------------------------------------------------#
-
-#-----------------------------------------------------------------------------#
 # SYSTEM-SPECIFIC GENE SET - IMMUNE
 #-----------------------------------------------------------------------------#
 
-#-----------------------------------------------------------------------------#
-# SYSTEM-SPECIFIC GENE SET - HORMONAL 
-#-----------------------------------------------------------------------------#
+message("(VII) Immune System-Specifc Gene Dataset - Creation & Export")
+
+innateDB.RAW <- read.csv(file.path(data_path, "InnateDB_genes.csv"), header=TRUE, na="NA")
+innateDB <- subset(innateDB.RAW, innateDB.RAW$species == "Homo sapiens")
+
+geneExpressionData.CPM.DCM.INNATE <- geneExpressionData.CPM.DCM[rownames(geneExpressionData.CPM.DCM) %in% innateDB$ensembl, ]
+geneExpressionData.CPM.meanFiltered.DCM.INNATE <- geneExpressionData.CPM.meanFiltered[
+  rownames(geneExpressionData.CPM.meanFiltered) %in% innateDB$ensembl, ]
+
+saveRDS(geneExpressionData.CPM.DCM.INNATE, file.path(cache_path, "geneExpressionData_DCM_INNATE.rds"))
+saveRDS(geneExpressionData.CPM.meanFiltered.DCM.INNATE, file.path(cache_path, "geneExpressionData_DCM_meanFiltered_INNATE.rds"))
 
 #-----------------------------------------------------------------------------#
-# SYSTEM-SPECIFIC GENE SET - CARDIOVASCULAR 
+# COMPLETE
 #-----------------------------------------------------------------------------#
 
+message("--- Finished Quality Control ---")
