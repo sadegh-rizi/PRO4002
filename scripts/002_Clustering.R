@@ -182,3 +182,77 @@ saveRDS(sampleData.annotated, file.path(cache_path, "sampleData_DCM_subtypes.rds
 #-----------------------------------------------------------------------------#
 
 message("--- Finished Clustering ---")
+
+
+#-----------------------------------------------------------------------------#
+# GENE EXPRESSION
+#----------------------------------------------------------------------------#
+# Check to be sure
+print("Cluster Counts:")
+print(table(dcm_meta$Endotype))
+
+dcm_expr <- dcm_cpm[, rownames(dcm_cluster)]
+print(paste("Analyzing", nrow(dcm_expr), "Genes across", ncol(dcm_expr), "Patients"))
+
+Endotype <- factor(dcm_cluster$Endotype, levels = c("1", "2", "3"))
+design <- model.matrix(~0 + Endotype)
+colnames(design) <- c("C1", "C2", "C3")
+
+# B. Fit Linear Model
+fit <- lmFit(dcm_expr, design)
+
+# C. Create Contrasts (One-vs-All for K=3)
+# Logic: Compare Cluster X against the Average of the other TWO.
+contrast_matrix <- makeContrasts(
+  C1_Unique = C1 - (C2 + C3)/2,
+  C2_Unique = C2 - (C1 + C3)/2,
+  C3_Unique = C3 - (C1 + C2)/2,
+  levels = design
+)
+
+# D. Apply Contrasts
+fit2 <- contrasts.fit(fit, contrast_matrix)
+fit2 <- eBayes(fit2)
+
+all_genes <- rownames(dcm_expr)
+
+gene_map <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol", "description"),
+  filters = "ensembl_gene_id",
+  values = all_genes,
+  mart = ensembl
+)
+
+export_top_genes <- function(contrast_name, cluster_id) {
+  
+  # Get Top 50 Genes
+  top_table <- topTable(fit2, coef = contrast_name, number = 50, adjust.method = "fdr")
+  
+  # Annotate
+  top_table$EnsemblID <- rownames(top_table)
+  top_table$Symbol <- gene_map$hgnc_symbol[match(top_table$EnsemblID, gene_map$ensembl_gene_id)]
+  top_table$Description <- gene_map$description[match(top_table$EnsemblID, gene_map$ensembl_gene_id)]
+  
+  # Clean & Sort
+  final_table <- top_table %>%
+    select(Symbol, EnsemblID, logFC, adj.P.Val, Description) %>%
+    arrange(adj.P.Val)
+  
+  # Print Preview
+  print(paste("--- TOP MARKERS FOR CLUSTER", cluster_id, "---"))
+  print(head(final_table, 5))
+  
+    # Save
+  filename <- paste0("results/Tables/Cluster_", cluster_id, "_Top_Genes.csv")
+  write.csv(final_table, filename, row.names = FALSE)
+}
+
+# ------------------------------------------------------------------------------
+# 6. EXECUTE
+# ------------------------------------------------------------------------------
+
+export_top_genes("C1_Unique", "1")
+export_top_genes("C2_Unique", "2")
+export_top_genes("C3_Unique", "3")
+
+print("SUCCESS: 3 Cluster gene lists exported to 'results/Tables/'")
