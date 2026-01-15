@@ -22,9 +22,9 @@ message("\n--- Starting Clustering ---")
 
 message("(I) Data Import ")
 
-geneExpressionData.CPM.meanFiltered.DCM <- readRDS(file.path(cache_path, "geneExpressionData_DCM_meanFiltered.RDS"))
-sampleData.DCM <- readRDS(file.path(cache_path, "sampleData_DCM.RDS"))
-geneListInfo <- readRDS(file.path(cache_path, "geneListInfo.RDS"))
+geneExpressionData.CPM.meanFiltered.DCM <- readRDS(file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
+sampleData.DCM <- readRDS(file.path(cache_path, "sampleData_DCM.rds"))
+geneListInfo <- readRDS(file.path(cache_path, "geneListInfo.rds"))
 
 #-----------------------------------------------------------------------------#
 # PARAMETER SETUP
@@ -32,8 +32,8 @@ geneListInfo <- readRDS(file.path(cache_path, "geneListInfo.RDS"))
 
 seed <- 123
 num_genes <- 1000    # Number of Genes to Use for Clustering
-distance_measure <- "pearson"
-clustering_algorithm <- "pam"
+distance_measure <- "euclidean"
+clustering_algorithm <- "km"
 
 #-----------------------------------------------------------------------------#
 # FEATURE SELECTION - Variance-Based Filtering (Highly Variable Genes)
@@ -110,16 +110,40 @@ colors.annotated <- list(
   lvef = colorRampPalette(c("white", npg_colors[[1]]))(100) # Continuous color scale for heart function
 )
 
+geneExpressionData.variance.selected.centered.ordered <- geneExpressionData.variance.selected.centered[,order(sampleData.annotated$subtype)]
+
+cor_mat <- cor(
+  geneExpressionData.variance.selected.centered.ordered,
+  method = "pearson",
+  use = "everything"
+)
+cor_mat_heat <- cov2cor(cor_mat)
+
 pheatmap(
-  geneExpressionData.variance.selected.centered,
-  color = colorRampPalette(c(npg_colors[[4]], "white", npg_colors[[1]]))(100),
-  breaks = seq(-2, 2, length.out = 101), # Cap scale at z-score +/- 2
+  cor_mat_heat,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  clustering_method = "complete",
+  main = "Patient–Patient Gene Expression Correlation",
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
   show_rownames = FALSE,      # Too many genes to show names
-  show_colnames = FALSE,      # Hiding sample names for cleaner look
+  show_colnames = FALSE,   
   annotation_col = sampleData.annotated,
   annotation_colors = colors.annotated,
-  clustering_method = "ward.D2",
-  cutree_cols = k_choice,
+  border_color = NA,
+  filename = file.path(cluster_path, "subtypeHeatmap_DCM.jpg"),
+)
+
+pheatmap(
+  geneExpressionData.variance.selected.centered.ordered,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  color = colorRampPalette(c(npg_colors[[4]], "white", npg_colors[[1]]))(100),
+  breaks = seq(-2, 2, length.out = 101), # Cap scale at z-score +/- 2
+  show_rownames = TRUE,      # Too many genes to show names
+  show_colnames = TRUE,      # Hiding sample names for cleaner look
+  annotation_col = sampleData.annotated,
+  annotation_colors = colors.annotated,
   na_col = "grey30",
   main = paste0("DCM Molecular Subtypes (Top ", num_genes, " Variable Genes)"),
   filename = file.path(cluster_path, "subtypeHeatmap_DCM.jpg"),
@@ -132,16 +156,27 @@ pheatmap(
 
 message("(IV) Clustering - Stability Analysis")
 
-geneData.distance <- as.dist(1 - cor(geneExpressionData.variance.selected.centered, method = "pearson"))
-silhouetteData <- silhouette(as.numeric(sampleData.annotated$subtype), geneData.distance) 
-silhouetteDataPlot <- fviz_silhouette(silhouetteData,  
+geneData.bootstrap <- clusterboot(
+  t(geneExpressionData.variance.selected.centered), 
+  B = 100,
+  bootmethod = "boot", 
+  clustermethod = kmeansCBI,
+  k = k_choice,
+  count = FALSE
+) 
+
+geneData.stabilityScores <- geneData.bootstrap$bootmean
+message(paste("  Stability Scores:", round(geneData.stabilityScores, 3)))
+
+#silhouetteData <- silhouette(as.numeric(sampleData.annotated$subtype), geneData.stabilityScores) 
+#silhouetteDataPlot <- fviz_silhouette(silhouetteData,  
                             palette = npg_colors,  
                             ggtheme = my_style, 
                             main = paste0("Cluster Stability (k=", k_choice, "): Silhouette Plot")) 
-ggsave(file.path(cluster_path, "silhouetteDataPlot.jpg"), silhouetteDataPlot, width = 8, height = 6) 
+#ggsave(file.path(cluster_path, "silhouetteDataPlot.jpg"), silhouetteDataPlot, width = 8, height = 6) 
 
-silhouetteData.width <- summary(silhouetteData)$avg.width 
-message(paste("Average Silhouette Width:", round(silhouetteData.width, 3))) 
+#silhouetteData.width <- summary(silhouetteData)$avg.width 
+#message(paste("Average Silhouette Width:", round(silhouetteData.width, 3))) 
 
 #-----------------------------------------------------------------------------#
 # CLUSTERING VISUALIZATION
@@ -178,7 +213,77 @@ message("(IV) Data Export")
 saveRDS(sampleData.annotated, file.path(cache_path, "sampleData_DCM_subtypes.rds"))
 
 #-----------------------------------------------------------------------------#
+# CLUSTER DIFFERENTIAL GENE EXPRESSION ANALYSIS
+#----------------------------------------------------------------------------#
+message("(V) CLUSTER DGE Analysis")
+
+message("  Cluster Counts:")
+print(table(sampleData.annotated$subtype))
+
+message(paste("  Analyzing", nrow(geneExpressionData.variance.selected.centered), "Genes across", ncol(geneExpressionData.variance.selected.centered), "Patients."))
+
+subtypes <- factor(sampleData.annotated$subtype, levels = c("1", "2", "3"))
+design <- model.matrix(~ 0 + subtype, data=sampleData.annotated)
+colnames(design) <- c("C1", "C2", "C3")
+
+# B. Fit Linear Model
+fit <- lmFit(geneExpressionData.variance.selected.centered, design)
+
+# C. Create Contrasts (One-vs-All for K=3)
+# Logic: Compare Cluster X against the Average of the other TWO.
+contrast_matrix <- makeContrasts(
+  C1_Unique = C1 - (C2 + C3)/2,
+  C2_Unique = C2 - (C1 + C3)/2,
+  C3_Unique = C3 - (C1 + C2)/2,
+  levels = design
+)
+
+# D. Apply Contrasts
+fit2 <- contrasts.fit(fit, contrast_matrix)
+fit2 <- eBayes(fit2)
+
+export_top_genes <- function(contrast_name, cluster_id) {
+  
+  # Get Top 50 Genes
+  top_table <- topTable(fit2, coef = contrast_name, number = 50, adjust.method = "fdr")
+  
+  # Annotate
+  top_table$EnsemblID <- rownames(top_table)
+  top_table$Symbol <- geneListInfo$hgnc_symbol[match(top_table$EnsemblID, geneListInfo$ensembl_gene_id)]
+  top_table$Description <- geneListInfo$description[match(top_table$EnsemblID, geneListInfo$ensembl_gene_id)]
+  
+  # Clean & Sort
+  final_table <- top_table %>%
+    dplyr::select(Symbol, EnsemblID, logFC, adj.P.Val, Description) %>%
+    arrange(adj.P.Val)
+  
+  # Print Preview
+  print(paste("--- TOP MARKERS FOR CLUSTER", cluster_id, "---"))
+  print(head(final_table, 5))
+  
+    # Save
+  filename <- file.path(tables_path, paste0("Cluster_", cluster_id, "_Top_Genes.csv"))
+  write.csv(final_table, filename, row.names = FALSE)
+}
+
+export_top_genes("C1_Unique", "1")
+export_top_genes("C2_Unique", "2")
+export_top_genes("C3_Unique", "3")
+
+#-----------------------------------------------------------------------------#
 # COMPLETE
 #-----------------------------------------------------------------------------#
 
 message("--- Finished Clustering ---")
+
+
+
+
+
+
+
+
+
+
+
+
