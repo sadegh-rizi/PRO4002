@@ -20,7 +20,8 @@ packages <- c(
   "readr", "readxl", "gprofiler2", "knitr", "Hmisc", "table1",
   "gt", "gtsummary", "ggsci", "edgeR", "htmltools",
   "ConsensusClusterPlus", "pheatmap", "limma", "qvalue", 
-  "biomaRt", "DESeq2", "dplyr", "factoextra", "cluster", "ggpubr"
+  "biomaRt", "DESeq2", "dplyr", "factoextra", "cluster", "ggpubr",
+  "fpc"
 )
 
 message("(I) Loading Packages")
