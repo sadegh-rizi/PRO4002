@@ -182,15 +182,20 @@ geneData.bootstrap <- clusterboot(
 geneData.stabilityScores <- geneData.bootstrap$bootmean
 message(paste("  Stability Scores:", round(geneData.stabilityScores, 3)))
 
-#silhouetteData <- silhouette(as.numeric(sampleData.annotated$subtype), geneData.stabilityScores) 
-#silhouetteDataPlot <- fviz_silhouette(silhouetteData,  
-#                            palette = npg_colors,  
-#                            ggtheme = my_style, 
-#                            main = paste0("Cluster Stability (k=", k_choice, "): Silhouette Plot")) 
-#ggsave(file.path(cluster_path, "silhouetteDataPlot.jpg"), silhouetteDataPlot, width = 8, height = 6) 
+jpeg(filename = file.path(cluster_path, "ClusterStability.jpg"), 
+     width = 600, height = 500, quality = 90)
+barplot(geneData.stabilityScores, 
+        ylim = c(0, 1), 
+        col = ifelse(geneData.stabilityScores > 0.6, "steelblue", "firebrick"),
+        main = "Cluster Stability (Bootstrap)",
+        ylab = "Jaccard Similarity Score",
+        # This adds the "Cluster 1, Cluster 2..." labels automatically
+        names.arg = paste("Cluster", 1:length(geneData.stabilityScores)))
 
-#silhouetteData.width <- summary(silhouetteData)$avg.width 
-#message(paste("Average Silhouette Width:", round(silhouetteData.width, 3))) 
+abline(h = 0.6, lty = 2, col = "black")
+dev.off()
+
+print("SUCCESS: stability check complete.")
 
 #-----------------------------------------------------------------------------#
 # CLUSTERING VISUALIZATION
@@ -298,6 +303,7 @@ export_top_genes("C3_Unique", "3")
 #-----------------------------------------------------------------------------#
 
 message("--- Finished Clustering ---")
+
 
 
 
