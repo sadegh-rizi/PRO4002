@@ -41,6 +41,16 @@ clustering_algorithm <- "km"
 
 message("(II) Feature Selection ")
 
+
+# Impute the one RIN value that is missing
+sampleData.DCM$rin[is.na(sampleData.DCM$rin)] <- median(sampleData.DCM$rin, na.rm = TRUE)
+
+# Remove dwares with weird BMIs
+sampleData.DCM <- sampleData.DCM %>% filter(height>100)
+rownames(sampleData.DCM) <- sampleData.DCM$sample_name
+
+geneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFiltered.DCM[,rownames(sampleData.DCM)]
+
 geneData.variance <- apply(geneExpressionData.CPM.meanFiltered.DCM, 1, var)
 geneData.variance.selected <- names(sort(geneData.variance, decreasing = TRUE))[1:num_genes]
 geneExpressionData.variance.selected <- geneExpressionData.CPM.meanFiltered.DCM[geneData.variance.selected, ]
@@ -83,21 +93,25 @@ clusterLabels.formatted <- paste0("Cluster_", clusterLabels)
 all(sampleData.DCM$sample_name == names(clusterLabels.formatted))
 sampleData.DCM$subtype <- clusterLabels.formatted
 
+
+
 table(sampleData.DCM$subtype)
 
 geneExpressionData.variance.selected.centered <- as.matrix(geneExpressionData.variance.selected.centered)
+
 
 sampleData.annotated <- sampleData.DCM %>%
   dplyr::select(subtype, gender, lvef, race) %>%
   mutate(lvef = lvef * 100) %>%
   as.data.frame()
+rownames(sampleData.annotated) <- sampleData.DCM$sample_name
 
 sampleData.annotated$subtype <- factor(sampleData.annotated$subtype)
 sampleData.annotated$gender  <- factor(sampleData.annotated$gender)
 sampleData.annotated$race  <- factor(sampleData.annotated$race)
 sampleData.annotated$lvef    <- as.numeric(as.character(sampleData.annotated$lvef))
 
-rownames(sampleData.annotated) <- sampleData.DCM$sample_name
+
 
 colors.annotated <- list(
   subtype = c(
@@ -170,9 +184,9 @@ message(paste("  Stability Scores:", round(geneData.stabilityScores, 3)))
 
 #silhouetteData <- silhouette(as.numeric(sampleData.annotated$subtype), geneData.stabilityScores) 
 #silhouetteDataPlot <- fviz_silhouette(silhouetteData,  
-                            palette = npg_colors,  
-                            ggtheme = my_style, 
-                            main = paste0("Cluster Stability (k=", k_choice, "): Silhouette Plot")) 
+#                            palette = npg_colors,  
+#                            ggtheme = my_style, 
+#                            main = paste0("Cluster Stability (k=", k_choice, "): Silhouette Plot")) 
 #ggsave(file.path(cluster_path, "silhouetteDataPlot.jpg"), silhouetteDataPlot, width = 8, height = 6) 
 
 #silhouetteData.width <- summary(silhouetteData)$avg.width 
@@ -222,11 +236,20 @@ print(table(sampleData.annotated$subtype))
 
 message(paste("  Analyzing", nrow(geneExpressionData.variance.selected.centered), "Genes across", ncol(geneExpressionData.variance.selected.centered), "Patients."))
 
-subtypes <- factor(sampleData.annotated$subtype, levels = c("1", "2", "3"))
-design <- model.matrix(~ 0 + subtype, data=sampleData.annotated)
-colnames(design) <- c("C1", "C2", "C3")
 
-# B. Fit Linear Model
+
+print(paste("Patients in Expression Data:", ncol(geneExpressionData.variance.selected.centered)))
+print(paste("Patients in Design Matrix:", nrow(design)))
+
+# Check for NAs in your metadata (The likely killer)
+print("--- Checking for NAs in Covariates ---")
+
+
+
+
+subtypes <- factor(sampleData.DCM$subtype, levels = c("Cluster_1", "Cluster_2", "Cluster_3"))
+design <- model.matrix(~ 0 + subtype+rin+age+gender+Library.Pool, data=sampleData.DCM)
+colnames(design) <- gsub("subtypeCluster_", "C", colnames(design))# B. Fit Linear Model
 fit <- lmFit(geneExpressionData.variance.selected.centered, design)
 
 # C. Create Contrasts (One-vs-All for K=3)
