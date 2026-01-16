@@ -250,7 +250,7 @@ print("--- Checking for NAs in Covariates ---")
 subtypes <- factor(sampleData.DCM$subtype, levels = c("Cluster_1", "Cluster_2", "Cluster_3"))
 design <- model.matrix(~ 0 + subtype+rin+age+gender+Library.Pool, data=sampleData.DCM)
 colnames(design) <- gsub("subtypeCluster_", "C", colnames(design))# B. Fit Linear Model
-fit <- lmFit(geneExpressionData.variance.selected.centered, design)
+fit <- lmFit(geneExpressionData.variance.selected, design)
 
 # C. Create Contrasts (One-vs-All for K=3)
 # Logic: Compare Cluster X against the Average of the other TWO.
