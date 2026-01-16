@@ -305,19 +305,48 @@ geneExpressionData.FPKM <- cpm2fpkm(geneExpressionData.CPM, exonLengthsData)
 #-----------------------------------------------------------------------------#
 
 message("(IV) Gene Expression Data - Background Noise Removal ")
+# This Previously led to errors and filtering more genes than we want
 
-annotatedGeneExpressionData.FPKM <- merge(geneExpressionData.FPKM, geneListInfo, by.x="row.names", by="ensembl_gene_id")
+#annotatedGeneExpressionData.FPKM <- merge(geneExpressionData.FPKM, geneListInfo, by.x="row.names", by="ensembl_gene_id")
 
-geneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM[annotatedGeneExpressionData.FPKM$chromosome_name == "Y",
-                                                    sampleData$gender == "Female", drop=FALSE]
+#geneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM[annotatedGeneExpressionData.FPKM$chromosome_name == "Y",
+#                                                    sampleData$gender == "Female", drop=FALSE]
+
+
+#-----------------------------------------------------------------------------#
+# CORRECTED STEP IV: Merging without destroying row order
+#-----------------------------------------------------------------------------#
+
+message("(IV) Gene Expression Data - Background Noise Removal (FIXED)")
+
+# 1. Make sure geneListInfo aligns with the original data order
+# We use 'match' to ensure the order is identical to the expression matrix
+matched_indices <- match(rownames(geneExpressionData.FPKM), geneListInfo$ensembl_gene_id)
+ordered_gene_info <- geneListInfo[matched_indices, ]
+
+# 2. Identify Y Chromosome genes (using the correctly ordered info)
+# (Optional: Add the PAR gene exclusion here as discussed previously)
+is_Y_gene <- ordered_gene_info$chromosome_name == "Y"
+is_female <- sampleData$gender == "Female"
+
+# 3. Subset correctly
+# Now 'is_Y_gene' corresponds perfectly to the rows of 'geneExpressionData.FPKM'
+geneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM[is_Y_gene, is_female, drop=FALSE]
+
+# 4. Proceed with calculation
+backgroundExpressionData.femaleY <- as.numeric(as.matrix(geneExpressionData.FPKM.femaleY))
+
+backgroundThresholdMeanExpressionData <- mean(backgroundExpressionData.femaleY, na.rm=TRUE)
+
+# Check the result
+message("New Mean Threshold: ", backgroundThresholdMeanExpressionData)
+
 
 # Create Numerical List of Gene Expression Data of Female Patient Y-Chromosome Genes
-backgroundExpressionData.femaleY <- as.numeric(as.matrix(geneExpressionData.FPKM.femaleY))
 
 backgroundThreshold95PExpressionData <- quantile(backgroundExpressionData.femaleY, 
                                                  probs=0.95, na.rm=TRUE)
 
-backgroundThresholdMeanExpressionData <- mean(backgroundExpressionData.femaleY)
 
 extendedGeneExpressionData.FPKM.femaleY <- geneExpressionData.FPKM.femaleY %>%
   tibble::rownames_to_column("ensembl_gene_id") %>%
@@ -357,6 +386,10 @@ densityPlotDataDistribution.threshold <- ggplot(data = extendedGeneExpressionDat
            label = "Mean Threshold", color = npg_colors[4], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
   labs(title  ="Gene Expression Level Density Plot with Threshold", x="Gene Expression Level (FPKM)",y = "Density")
 densityPlotDataDistribution.threshold
+
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_threshold.jpg"), 
+       plot = densityPlotDataDistribution.threshold, 
+       width = 8, height = 6, dpi = 300 )
 
 meanGeneExpressionData <- rowMeans(geneExpressionData.FPKM, na.rm=TRUE)
 
