@@ -264,3 +264,176 @@ p_faceted <- ggplot(df_filtered, aes(x = Contrast, y = Description)) +
 
 # Save
 ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted.pdf"), p_faceted, width = 14, height = 12)
+
+
+
+message("(III) Preparing Matrix for ComplexHeatmap")
+
+# 1. Subset & Scale Expression Data
+heatmap_matrix <- geneExpressionData[valid_genes, ]
+heatmap_scaled <- t(scale(t(heatmap_matrix)))
+
+# 2. Prepare Match Vector for Rows (Category)
+# We need a vector that matches the order of rows in the matrix exactly
+row_categories <- gene_category_map$Category[match(rownames(heatmap_scaled), gene_category_map$geneID)]
+
+# 3. Define Colors (ComplexHeatmap format)
+# We use the 'circlize' package for the gradient
+library(ComplexHeatmap)
+library(circlize)
+
+# Heatmap Body Colors (Blue -> White -> Red)
+col_fun <- colorRamp2(c(-2, 0, 2), c("navy", "white", "firebrick3"))
+
+# Annotation Colors
+# Note: Ensure npg_colors are defined (from your setup script)
+category_colors <- c(
+  "Mitochondria & Metabolism" = "#E64B35",
+  "Heart Function & Structure" = "#4DBBD5",
+  "Extracellular Matrix & Fibrosis" = "#00A087",
+  "Immune Response" = "#3C5488",
+  "Protein Synthesis & Processing" = "#F39B7F",
+  "Signaling & Regulation" = "#8491B4"
+)
+
+subtype_colors <- c(
+  "Cluster_1" = npg_colors[[1]], 
+  "Cluster_2" = npg_colors[[2]], 
+  "Cluster_3" = npg_colors[[3]]
+)
+#-----------------------------------------------------------------------------#
+# 4. PREPARE HEATMAP DATA (ROBUST MAPPING)
+#-----------------------------------------------------------------------------#
+message("(III) Preparing Matrix with Correct ID Mapping")
+
+# A. Create a Master Table: Symbol | Ensembl | Category
+# We start with the symbols from your enrichment result
+master_map <- gene_category_map %>%
+  dplyr::rename(Symbol = geneID) %>%
+  # Add Ensembl IDs from your geneListInfo
+  left_join(geneListInfo, by = c("Symbol" = "hgnc_symbol")) %>%
+  # Filter: Keep only genes that actually exist in your Expression Data
+  filter(ensembl_gene_id %in% rownames(geneExpressionData)) %>%
+  # Deduplicate: If a gene maps to multiple categories, keep the first one (or most relevant)
+  distinct(ensembl_gene_id, .keep_all = TRUE)
+
+message(paste("Identified", nrow(master_map), "genes matching between Pathway terms and Expression Data."))
+
+# B. Subset Expression Matrix using Ensembl IDs (The stable ID)
+heatmap_matrix <- geneExpressionData[master_map$ensembl_gene_id, ]
+
+# C. Set Rownames to Symbols (for the plot)
+# We use make.unique to handle duplicates like "GeneA.1" without breaking the map
+plot_symbols <- make.unique(master_map$Symbol)
+rownames(heatmap_matrix) <- plot_symbols
+
+# D. Create the Category Vector (The Fix)
+# Now we rely on the master_map order, which matches the matrix exactly.
+row_categories <- master_map$Category
+
+# E. Scale the Data
+heatmap_scaled <- t(scale(t(heatmap_matrix)))
+
+#-----------------------------------------------------------------------------#
+# 5. GENERATE COMPLEX HEATMAP
+#-----------------------------------------------------------------------------#
+message("(IV) Generating ComplexHeatmap")
+
+library(ComplexHeatmap)
+library(circlize)
+
+# Colors
+col_fun <- colorRamp2(c(-2, 0, 2), c("navy", "white", "firebrick3"))
+
+category_colors <- c(
+  "Mitochondria & Metabolism" = "#E64B35",
+  "Heart Function & Structure" = "#4DBBD5",
+  "Extracellular Matrix & Fibrosis" = "#00A087",
+  "Immune Response" = "#3C5488",
+  "Protein Synthesis & Processing" = "#F39B7F",
+  "Signaling & Regulation" = "#8491B4"
+)
+
+subtype_colors <- c(
+  "Cluster_1" = npg_colors[[1]], 
+  "Cluster_2" = npg_colors[[2]], 
+  "Cluster_3" = npg_colors[[3]]
+)
+
+# Annotations
+ha_top <- HeatmapAnnotation(
+  Subtype = sampleData$subtype,
+  col = list(Subtype = subtype_colors),
+  simple_anno_size = unit(0.5, "cm"),
+  show_annotation_name = TRUE
+)
+
+ha_left <- rowAnnotation(
+  Category = row_categories,
+  col = list(Category = category_colors),
+  show_legend = FALSE, 
+  width = unit(5, "mm")
+)
+
+# Draw Plot
+pdf(file.path(enrichment_plots_path, "Pathway_Genes_Heatmap_Complex.pdf"), width = 12, height = 14)
+
+ht <- Heatmap(
+  heatmap_scaled,
+  name = "Z-Score",
+  col = col_fun,
+  
+  # Attach Annotations
+  top_annotation = ha_top,
+  left_annotation = ha_left,
+  
+  # SPLIT: This groups the heatmap blocks by Category
+  row_split = row_categories,
+  column_split = sampleData$subtype,
+  
+  # Settings
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_names = FALSE,
+  show_column_names = FALSE,
+  
+  # Fix Text Cutting
+  row_title_rot = 0,             # Horizontal Titles
+  row_title_gp = gpar(fontsize = 10, fontface = "bold"),
+  row_names_gp = gpar(fontsize = 8),
+  
+  # Gaps
+  row_gap = unit(2, "mm"),
+  column_gap = unit(1, "mm")
+)
+
+draw(ht, 
+     merge_legend = TRUE, 
+     column_title = "Gene Expression Landscape of Enriched Pathways", 
+     column_title_gp = gpar(fontsize = 16, fontface = "bold")
+)
+dev.off()
+
+message("Saved: Pathway_Genes_Heatmap_Complex.pdf")
+
+message("Saving PNG version...")
+
+# Define the filename
+png_filename <- file.path(enrichment_plots_path, "Pathway_Genes_Heatmap_Complex.png")
+
+# Open PNG device
+# width/height are in inches (same as PDF)
+# res=300 is standard for publication quality (prevents blurry text)
+png(png_filename, width = 12, height = 14, units = "in", res = 300)
+
+# Draw the exact same heatmap object 'ht'
+draw(ht, 
+     merge_legend = TRUE, 
+     column_title = "Gene Expression Landscape of Enriched Pathways", 
+     column_title_gp = gpar(fontsize = 16, fontface = "bold")
+)
+
+# Close the device
+dev.off()
+
+message("Saved: Pathway_Genes_Heatmap_Complex.png")
