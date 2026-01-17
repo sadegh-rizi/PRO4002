@@ -23,7 +23,13 @@ library(edgeR)
 library(clusterProfiler)
 library(org.Hs.eg.db)
 library(enrichplot)
-
+library(rstudioapi)        # For setting working directory
+library(readxl)            # For reading Excel files
+library(EnhancedVolcano)   # For creating volcano plots
+library(VennDiagram)       # For creating Venn diagrams
+library(rWikiPathways)     # For accessing WikiPathways
+library(dplyr)             # For data manipulation
+library(RCy3)              # For Cytoscape integration
 message("\n--- Starting Pathway Enrichment ---")
 
 #-----------------------------------------------------------------------------#
@@ -265,6 +271,7 @@ p_faceted <- ggplot(df_filtered, aes(x = Contrast, y = Description)) +
 # Save
 ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted.pdf"), p_faceted, width = 14, height = 12)
 
+ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted.pdf"), p_faceted, width = 14, height = 12)
 
 
 message("(III) Preparing Matrix for ComplexHeatmap")
@@ -437,3 +444,115 @@ draw(ht,
 dev.off()
 
 message("Saved: Pathway_Genes_Heatmap_Complex.png")
+
+
+
+
+
+
+#-----------------------------------------------------------------------------#
+# Cytoscape mapping
+#-----------------------------------------------------------------------------#
+
+# Test connection to Cytoscape
+RCy3::cytoscapePing()
+
+# Install required Cytoscape apps if not already installed
+if (!grepl("status: Installed", RCy3::getAppStatus("wikipathways"))) {
+  RCy3::installApp("wikipathways")
+}
+
+if (!grepl("status: Installed", RCy3::getAppStatus("enhancedGraphics"))) {
+  RCy3::installApp("enhancedGraphics")
+}
+
+cat("Cytoscape is ready!\n")
+
+
+message("(I) Preparing Differential Expression Data")
+
+# We need a single table with: EnsemblID | LogFC_C1 | LogFC_C2 | LogFC_C3
+
+# Extract logFC for each contrast
+# Note: Ensure 'fit2' exists. If not, re-run the limma step from 003.
+c1_data <- topTable(fit2, coef = "C1_Identity", number = Inf, sort.by = "none") %>% dplyr::select(logFC) %>% dplyr::rename(C1_logFC = logFC)
+c2_data <- topTable(fit2, coef = "C2_Identity", number = Inf, sort.by = "none") %>% dplyr::select(logFC) %>% dplyr::rename(C2_logFC = logFC)
+c3_data <- topTable(fit2, coef = "C3_Identity", number = Inf, sort.by = "none") %>% dplyr::select(logFC) %>% dplyr::rename(C3_logFC = logFC)
+
+# Combine columns
+cytoscape_data <- bind_cols(c1_data, c2_data, c3_data)
+cytoscape_data$Ensembl_ID <- rownames(c1_data)
+
+# CRITICAL: Clean Ensembl IDs (Remove version suffix .1, .2)
+# Cytoscape usually expects pure IDs (ENSG000001...)
+cytoscape_data$Ensembl_Clean <- gsub("\\..*", "", cytoscape_data$Ensembl_ID)
+
+# View check
+print(head(cytoscape_data))
+
+#-----------------------------------------------------------------------------#
+# II. IMPORT PATHWAY (Oxidative Phosphorylation)
+#-----------------------------------------------------------------------------#
+message("(II) Importing Pathway")
+
+# We use WP111 (Electron Transport Chain) as discussed.
+# You can swap this for "WP383" (Striated Muscle Contraction) if you prefer.
+wp_id <- "WP111" 
+
+commandsRun(paste0('wikipathways import-as-pathway id=', wp_id)) 
+
+# Toggle graphics to make it look sharp
+toggleGraphicsDetails()
+
+#-----------------------------------------------------------------------------#
+# III. LOAD DATA INTO CYTOSCAPE
+#-----------------------------------------------------------------------------#
+message("(III) Loading Data onto Nodes")
+
+# We map our "Ensembl_Clean" column to the "Ensembl" column in the Pathway
+loadTableData(
+  cytoscape_data, 
+  data.key.column = "Ensembl_Clean", # Our column
+  table.key.column = "Ensembl"       # Cytoscape's column (Standard for WP)
+)
+
+#-----------------------------------------------------------------------------#
+# IV. APPLY HEATMAP STYLE
+#-----------------------------------------------------------------------------#
+message("(IV) Applying Heatmap Style")
+
+# 1. Create a new style based on the WikiPathways default
+style_name <- "DCM_Subtype_Style"
+copyVisualStyle("WikiPathways", style_name)
+setVisualStyle(style_name)
+
+# 2. Define the Columns to Visualize
+# These must match the column names in 'cytoscape_data'
+columns_to_map <- c("C1_logFC", "C2_logFC", "C3_logFC")
+
+# 3. Create the Heatmap (Node Custom Graphics)
+# Colors: Blue (-1) -> White (0) -> Red (1)
+setNodeCustomHeatMapChart(
+  columns = columns_to_map,
+  slot = 2,                     # Slot 2 puts it right on the node body
+  style.name = style_name,
+  colors = c("#E41A1C", "#FFFFFF","#377EB8" ,"#E4E3E3"), # Matches your previous plots
+  range = c(-1.5, 1.5)          # Cap the color scale at +/- 1.5 logFC
+)
+
+#-----------------------------------------------------------------------------#
+# V. EXPORT
+#-----------------------------------------------------------------------------#
+message("(V) Exporting Image")
+
+# Fit content to screen
+fitContent()
+
+# Save
+output_filename <- file.path(enrichment_plots_path, paste0("Cytoscape_", wp_id, "_Subtypes.png"))
+exportImage(output_filename, type = "PNG", zoom = 300)
+
+message(paste("Saved visualization to:", output_filename))
+
+
+
