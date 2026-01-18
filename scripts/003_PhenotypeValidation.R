@@ -27,8 +27,19 @@ message("(I) Data Import ")
 
 sampleData.DCM.annotated <- readRDS(file.path(cache_path, "sampleData_DCM_subtypes.rds"))
 sampleData.DCM <- readRDS(file.path(cache_path, "sampleData_DCM.rds"))
+
 sampleData.DCM.complete <- sampleData.DCM
+# Remove dwares with weird BMIs
+sampleData.DCM.complete <- sampleData.DCM.complete %>% filter(height>100)
+rownames(sampleData.DCM.complete) <- sampleData.DCM.complete$sample_name
+# Filter: Ensure we only keep samples that have a subtype
 sampleData.DCM.complete$subtype <- sampleData.DCM.annotated$subtype
+
+sampleData$subtype <- sampleData.subtypes$subtype[match(sampleData$sample_name, rownames(sampleData.subtypes))]
+sampleData$rin[is.na(sampleData$rin)] <- median(sampleData$rin, na.rm = TRUE)
+
+
+
 
 #-----------------------------------------------------------------------------#
 # DATA VISUALIZATION
@@ -113,7 +124,7 @@ sampleDataTINSubtypeViolinPlot <- ggplot(sampleData.DCM.complete, aes(x = subtyp
   center_title + my_style
 
 
-sampleDataRINSubtypeViolinPlot <- ggplot(sampleData.DCM.complete, aes(x = subtype, y = RIN, fill = subtype)) +
+sampleDataRINSubtypeViolinPlot <- ggplot(sampleData.DCM.complete, aes(x = subtype, y = rin, fill = subtype)) +
   geom_violin() +
   geom_jitter(width = 0.2, alpha = 0.5) +
   stat_compare_means(method = "kruskal.test", label.y = 90) +
