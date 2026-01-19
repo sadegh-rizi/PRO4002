@@ -118,7 +118,7 @@ demographicTable <- table1(demoTableStrata, demoTableLabels,
                            footnote=demoTableFootnote, topclass="Rtable1-zebra")
 
 save_html(demographicTable, file.path(tables_path, "demographicTable.html"))
-demographicTable
+write.csv(demographicTable, file.path(tables_path, "demographicTable.csv"), row.names = FALSE)
 
 #-----------------------------------------------------------------------------#
 # PARTICIPANT INFO DATA - CLINICAL CHARACTERISTICS BOXPLOT
@@ -288,6 +288,125 @@ ggsave(file.path(quality_control_path, "densityPlotDataDistribution_etiology_ove
        plot = densityPlotDataDistribution.etiology.overlap, 
        width = 8, height = 6, dpi = 300 )
 
+#-----------------------------------------------------------------------------#
+# PARTICIPANT INFO DATA - DCM PATIENT
+#-----------------------------------------------------------------------------#
+
+sampleData.DCM <- subset(sampleData, sampleData$etiology == "DCM")
+geneExpressionData.CPM.DCM <- geneExpressionData.CPM[, colnames(geneExpressionData.CPM) %in% sampleData.DCM$sample_name]
+sampleData.DCM <- subset(sampleData.DCM, bmi < 100)
+
+extendedGeneExpressionData.DCM <- geneExpressionData.CPM.DCM %>%
+  tibble::rownames_to_column("gene") %>%
+  pivot_longer(cols=-gene, names_to="patient", values_to="gene_expression_level") %>%
+  left_join(sampleData, by=c('patient'='sample_name'))
+
+# Data Distribution 
+densityPlotDataDistribution.DCM <- ggplot(data = extendedGeneExpressionData.DCM, 
+  aes(x = gene_expression_level)) +
+  geom_density(alpha=0.7, fill=standard_color) +
+  labs(title="Gene Expression Level Density Plot", x="Gene Expression Level (logCPM)", y="Density") +
+  scale_color_npg() +
+  scale_fill_npg() +
+  center_title + my_style
+
+ggsave(file.path(quality_control_path, "densityPlotDataDistribution_DCM.png"), 
+       plot = densityPlotDataDistribution.DCM, 
+       width = 8, height = 6, dpi = 300 )
+
+boxPlotDataDistribution.DCM <- ggplot(data = extendedGeneExpressionData.DCM, aes(x = patient, 
+  y = gene_expression_level)) +
+  geom_boxplot(alpha=0.7, fill=standard_color) + 
+  labs(title = "Patients vs. Gene Expression Level", x = "Patient",
+       y = "Gene Expression Level (logCPM)") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    strip.text.x = element_text(angle = 90, hjust = 0.5)) +
+  center_title + my_style
+
+ggsave(file.path(quality_control_path, "barPlotDataDistribution_DCM.png"), 
+       plot = boxPlotDataDistribution.DCM, 
+       width = 8, height = 6, dpi = 300 )
+
+clinicalSampleData.DCM <- sampleData.DCM %>%
+  dplyr::select(etiology, age, weight, height, bmi, lvef, rin, tin_median) %>%
+  tidyr::pivot_longer(
+    cols = -etiology,         
+    names_to = "characteristic",
+    values_to = "value") %>%
+  dplyr::mutate(
+    characteristic = str_to_title(characteristic),
+    characteristic = str_replace_all(
+      characteristic,
+      c(
+        "Age"    = "Age (years)",
+        "Weight" = "Weight (kg)",
+        "Height" = "Height (cm)",
+        "Bmi"    = "BMI (kg/m²)",
+        "Lvef"   = "LVEF (%)",
+        "Rin"    = "RIN",
+        "Tin_median"    = "TIN"
+      )
+    )
+  )
+
+clinicalSampleDataPlot.DCM <- ggplot(clinicalSampleData.DCM, aes(y = value)) +
+  geom_boxplot(outlier.shape = 21, outlier.fill = "white", fill=standard_color, alpha=0.7) +
+  facet_wrap(~ characteristic, scales = "free_y", nrow = 2) + 
+  scale_color_npg() +
+  scale_fill_npg() +
+  labs(
+    title = "DCM Patient Clinical Characteristics",
+    y = "Value (scales vary)",
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none", # Legend is redundant since x-axis is labeled
+    strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
+    strip.text = element_text(face = "bold")
+  ) +
+  center_title + my_style
+
+ggsave(file.path(quality_control_path, "clinicalSampleDataPlot_DCM.png"), clinicalSampleDataPlot.DCM, width = 10, height = 8)
+
+diseaseSampleData.DCM <- sampleData.DCM %>%
+  dplyr::select(etiology, Diabetes, afib, VTVF, Hypertension) %>%
+  tidyr::pivot_longer(
+    cols = -etiology,         
+    names_to = "characteristic",
+    values_to = "value") %>%
+  dplyr::mutate(
+    characteristic = str_replace_all(
+      characteristic,
+      c(
+        "Diabetes"    = "Diabetes",
+        "afib" = "Atrial Fibrillation",
+        "VTVF" = "VTVF",
+        "Hypertension"    = "Hypertension"
+      )
+    )
+  )
+
+diseaseSampleDataPlot.DCM <- ggplot(diseaseSampleData.DCM, aes(x = value)) +
+  geom_bar(fill=standard_color, alpha=0.7) +
+  facet_wrap(~ characteristic, scales = "free_y", nrow = 2) + 
+  scale_color_npg() +
+  scale_fill_npg() +
+  labs(
+    title = "DCM Patient Disease Characteristics",
+    y = "Count",
+    x = ""
+  ) +
+  theme(
+    legend.position = "none", # Legend is redundant since x-axis is labeled
+    strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
+    strip.text = element_text(face = "bold")
+  ) +
+  center_title + my_style
+
+ggsave(file.path(quality_control_path, "diseaseSampleDataPlot_DCM.png"), diseaseSampleDataPlot.DCM, width = 6, height = 8)
 
 #-----------------------------------------------------------------------------#
 # CPM TO FPKM CONVERSION 
@@ -361,7 +480,7 @@ extendedGeneExpressionData.FPKM <- geneExpressionData.FPKM %>%
 # Plot Density Expression Level of Female Patient Y-Chromosome Genes with Threshold 
 noiseExpressionDensityPlot <- ggplot(data=extendedGeneExpressionData.FPKM.femaleY,
                                      aes(x=log10(gene_expression_level))) +
-  geom_density(fill = npg_colors[2], color = npg_colors[2], alpha = 0.7) +
+  geom_density(fill = standard_color, color = standard_color, alpha = 0.7) +
   geom_vline(xintercept = log10(backgroundThreshold95PExpressionData), 
              color = npg_colors[1], linetype = "dashed", linewidth=0.8) +
   annotate("text", x = log10(backgroundThreshold95PExpressionData), y = 0, 
@@ -375,16 +494,19 @@ noiseExpressionDensityPlot
 
 densityPlotDataDistribution.threshold <- ggplot(data = extendedGeneExpressionData.FPKM, 
                                               aes(x = log10(gene_expression_level))) +
-  geom_density(fill = npg_colors[2], color = npg_colors[2], alpha = 0.7) +
-  geom_vline(xintercept=log10(backgroundThreshold95PExpressionData), 
-             color = npg_colors[1], linetype = "dashed", linewidth=0.8) +
-  annotate("text", x = log10(backgroundThreshold95PExpressionData), y = 0, 
-           label = "95% Threshold", color = npg_colors[1], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
+  geom_density(fill = standard_color, color = standard_color, alpha = 0.7) +
+  #geom_vline(xintercept=log10(backgroundThreshold95PExpressionData), 
+  #           color = npg_colors[1], linetype = "dashed", linewidth=0.8) +
+  # annotate("text", x = log10(backgroundThreshold95PExpressionData), y = 0, 
+  #         label = "95% Threshold", color = npg_colors[1], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
   geom_vline(xintercept = log10(backgroundThresholdMeanExpressionData), 
-             color = npg_colors[4], linetype = "dashed", linewidth=0.8) +
+             color = accent_color, linetype = "dashed", linewidth=1) +
   annotate("text", x = log10(backgroundThresholdMeanExpressionData), y = 0, 
-           label = "Mean Threshold", color = npg_colors[4], angle =90, vjust = -0.5, hjust=-0.3, size =4) +
-  labs(title  ="Gene Expression Level Density Plot with Threshold", x="Gene Expression Level (FPKM)",y = "Density")
+           label = "Mean Threshold", color = accent_color, angle =90, vjust = -0.5, hjust=-0.3, size =6) +
+  labs(title  ="Gene Expression Level Density Plot with Threshold", x="Gene Expression Level (logFPKM)",y = "Density") + 
+  scale_color_npg() +
+  scale_fill_npg() +
+  center_title + my_style
 densityPlotDataDistribution.threshold
 
 ggsave(file.path(quality_control_path, "densityPlotDataDistribution_threshold.jpg"), 
@@ -396,12 +518,12 @@ meanGeneExpressionData <- rowMeans(geneExpressionData.FPKM, na.rm=TRUE)
 aboveBackground95PThresholdGenes <- meanGeneExpressionData > backgroundThreshold95PExpressionData
 aboveBackgroundMeanThresholdGenes <- meanGeneExpressionData > backgroundThresholdMeanExpressionData
 
-message("  95% Percentile Threshold: ", backgroundThreshold95PExpressionData, "FPKM",
+message("  95% Percentile Threshold: ", backgroundThreshold95PExpressionData, " FPKM",
   "\n  Number of Genes with Expression Level Above or Below the Threshold",
   "\n   - above: ", sum(aboveBackground95PThresholdGenes),
   "\n   - below: ", sum(!aboveBackground95PThresholdGenes))
 
-message("  Mean Threshold: ", backgroundThresholdMeanExpressionData, "FPKM",
+message("  Mean Threshold: ", backgroundThresholdMeanExpressionData, " FPKM",
   "\n  Number of Genes with Expression Level Above or Below the Threshold",
   "\n   - above: ", sum(aboveBackgroundMeanThresholdGenes),
   "\n   - below: ", sum(!aboveBackgroundMeanThresholdGenes))
@@ -434,7 +556,7 @@ extendedGeneExpressionData.CPM.meanFiltered.DCM <- geneExpressionData.CPM.meanFi
 # Data Distribution 
 densityPlotDataDistribution.meanFiltered.DCM <- ggplot(data = extendedGeneExpressionData.CPM.meanFiltered.DCM, 
   aes(x = gene_expression_level)) +
-  geom_density(alpha=0.7, fill=npg_colors[[1]]) +
+  geom_density(alpha=0.7, fill=standard_color) +
   labs(title="Gene Expression Level Density Plot", x="Gene Expression Level (logCPM)", y="Density") +
   scale_color_npg() +
   scale_fill_npg() +

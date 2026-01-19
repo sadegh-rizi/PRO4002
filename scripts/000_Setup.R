@@ -78,6 +78,8 @@ message("(III) Setting Up Style")
 
 # Prepare Color Values to Match Nature Color Scheme
 npg_colors <- pal_npg("nrc", alpha = 1)(10)
+standard_color <- "#001C3D"
+accent_color <- "#00A2DB"
 npg_additional_colors <- colorRampPalette(npg_colors)(20)
 continuous_npg_colors <- colorRampPalette(c(npg_colors[2], "white"))(100)
 
