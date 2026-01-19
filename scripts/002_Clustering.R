@@ -65,8 +65,11 @@ message("(III) Clustering ")
 consensus_cluster_path <- file.path(plots_path, "ConsensusClustering")
 if(!dir.exists(consensus_cluster_path)) dir.create(consensus_cluster_path, recursive = TRUE)
 
-results <- ConsensusClusterPlus(
+source("ConsensusClusterPlusCopy.R")
+
+results <- ConsensusClusterPlusCopy(
   geneExpressionData.variance.selected.centered,
+  tmyPal = colorRampPalette(c("white", "#475B72"))(10),
   maxK = 6,              # Test k=2 to k=6 clusters
   reps = 1000,           # Resample 1000 times (High robustness)
   pItem = 0.8,           # Use 80% of samples per iteration
@@ -93,16 +96,23 @@ clusterLabels.formatted <- paste0("Cluster_", clusterLabels)
 all(sampleData.DCM$sample_name == names(clusterLabels.formatted))
 sampleData.DCM$subtype <- clusterLabels.formatted
 
-
-
 table(sampleData.DCM$subtype)
 
 geneExpressionData.variance.selected.centered <- as.matrix(geneExpressionData.variance.selected.centered)
 
-
 sampleData.annotated <- sampleData.DCM %>%
   dplyr::select(subtype, gender, lvef, race) %>%
   mutate(lvef = lvef * 100) %>%
+  dplyr::mutate(
+    subtype = str_replace_all(
+      subtype,
+      c(
+        "Cluster_1" = "Cluster 1",
+        "Cluster_2" = "Cluster 2",
+        "Cluster_3" = "Cluster 3"
+      )
+    )
+  ) %>%
   as.data.frame()
 rownames(sampleData.annotated) <- sampleData.DCM$sample_name
 
@@ -111,13 +121,11 @@ sampleData.annotated$gender  <- factor(sampleData.annotated$gender)
 sampleData.annotated$race  <- factor(sampleData.annotated$race)
 sampleData.annotated$lvef    <- as.numeric(as.character(sampleData.annotated$lvef))
 
-
-
 colors.annotated <- list(
   subtype = c(
-    Cluster_1 = npg_colors[[1]],  
-    Cluster_2 = npg_colors[[2]],  
-    Cluster_3 = npg_colors[[3]]   
+    "Cluster 1" = npg_colors[[1]],  
+    "Cluster 2" = npg_colors[[2]],  
+    "Cluster 3" = npg_colors[[3]]   
   ),
   gender = c(Male = "grey30", Female = "grey80"),
   race = c(Caucasian = "grey30", "African American" = "grey80"),
@@ -180,22 +188,23 @@ geneData.bootstrap <- clusterboot(
 ) 
 
 geneData.stabilityScores <- geneData.bootstrap$bootmean
-message(paste("  Stability Scores:", round(geneData.stabilityScores, 3)))
+geneData.stabilityScoresDF <- as.data.frame(geneData.stabilityScores)
+geneData.stabilityScoresDF$cluster <- c("Cluster 1", "Cluster 2", "Cluster 3")
+colnames(geneData.stabilityScoresDF) <- c("stability_score", "cluster")
 
-jpeg(filename = file.path(cluster_path, "ClusterStability.jpg"), 
-     width = 600, height = 500, quality = 90)
-barplot(geneData.stabilityScores, 
-        ylim = c(0, 1), 
-        col = ifelse(geneData.stabilityScores > 0.6, "steelblue", "firebrick"),
-        main = "Cluster Stability (Bootstrap)",
-        ylab = "Jaccard Similarity Score",
-        # This adds the "Cluster 1, Cluster 2..." labels automatically
-        names.arg = paste("Cluster", 1:length(geneData.stabilityScores)))
+stabilityScoreBarPlot <- ggplot(geneData.stabilityScoresDF, aes(x=cluster,y=stability_score)) + 
+  geom_col(color=npg_colors[1:3], fill=npg_colors[1:3], alpha=0.7) +
+  geom_hline(yintercept = 0.6, color = standard_color, linetype = "dashed", linewidth = 1) +
+  annotate("text", x = 0, y = 0.6, label = "Threshold", color = standard_color, vjust = -0.5,
+    hjust = -0.3, size = 4) +
+  labs(title  = "Cluster Stability (Bootstrap) Score", x="", y = "Jaccard Similarity Score") +
+  geom_text(aes(label = round(stability_score,3)), vjust = -0.5) + 
+  scale_color_npg() +
+  scale_fill_npg() +
+  center_title + my_style
 
-abline(h = 0.6, lty = 2, col = "black")
-dev.off()
-
-print("SUCCESS: stability check complete.")
+ggsave(file.path(cluster_path, "stabiltiyScorePlot.png"), plot = stabilityScoreBarPlot, 
+  width = 8, height = 6, dpi = 300 )
 
 #-----------------------------------------------------------------------------#
 # CLUSTERING VISUALIZATION
@@ -208,7 +217,9 @@ message("(V) Clustering - Visualization")
 geneExpressionDataPCAPlot <- fviz_cluster(list(data = t(geneExpressionData.variance.selected.centered), 
   cluster = sampleData.annotated$subtype), 
   geom = "point", ellipse.type = "convex", palette = npg_colors, 
-  ggtheme = my_style, main = "PCA: DCM Endotypes (No Double-Log)") 
+  ggtheme = my_style, main = "PCA: DCM Subtypes") +
+  labs(color = "", fill = "", shape = "")
+  
 ggsave(file.path(cluster_path, "subtypePCAPlot.jpg"), geneExpressionDataPCAPlot, width = 6, height = 5)
 
 # CLINICAL PHENOTYPE CHECK 
@@ -241,18 +252,13 @@ print(table(sampleData.annotated$subtype))
 
 message(paste("  Analyzing", nrow(geneExpressionData.variance.selected.centered), "Genes across", ncol(geneExpressionData.variance.selected.centered), "Patients."))
 
-
-
 print(paste("Patients in Expression Data:", ncol(geneExpressionData.variance.selected.centered)))
 print(paste("Patients in Design Matrix:", nrow(design)))
 
 # Check for NAs in your metadata (The likely killer)
 print("--- Checking for NAs in Covariates ---")
 
-
-
-
-subtypes <- factor(sampleData.DCM$subtype, levels = c("Cluster_1", "Cluster_2", "Cluster_3"))
+subtypes <- factor(sampleData.DCM$subtype, levels = c("Cluster 1", "Cluster 2", "Cluster3"))
 design <- model.matrix(~ 0 + subtype+rin+age+gender+Library.Pool, data=sampleData.DCM)
 colnames(design) <- gsub("subtypeCluster_", "C", colnames(design))# B. Fit Linear Model
 fit <- lmFit(geneExpressionData.CPM.meanFiltered.DCM, design)
@@ -270,16 +276,27 @@ contrast_matrix <- makeContrasts(
 fit2 <- contrasts.fit(fit, contrast_matrix)
 fit2 <- eBayes(fit2)
 
+plotEnhancedVolcano <- function(results_dgea, title, pval_cutoff = pval.cutoff, 
+                                log2Fc_cutoff = log2FC.cutoff) {
+  plot <- EnhancedVolcano(results_dgea,  title = title, labSize = 3, 
+                          x = 'logFC', y = 'P.Value', 
+                          lab = row.names(results_dgea),
+                          pCutoff = pval_cutoff, 
+                          FCcutoff = log2Fc_cutoff)
+  return(plot)
+}
+
 export_top_genes <- function(contrast_name, cluster_id) {
   
   # Get Top 50 Genes
   top_table <- topTable(fit2, coef = contrast_name, number = 50, adjust.method = "fdr")
-  
+  dge_result <- topTable(fit2, coef = contrast_name, number = nrow(geneExpressionData.CPM.meanFiltered.DCM))
+
   # Annotate
   top_table$EnsemblID <- rownames(top_table)
   top_table$Symbol <- geneListInfo$hgnc_symbol[match(top_table$EnsemblID, geneListInfo$ensembl_gene_id)]
   top_table$Description <- geneListInfo$description[match(top_table$EnsemblID, geneListInfo$ensembl_gene_id)]
-  
+
   # Clean & Sort
   final_table <- top_table %>%
     dplyr::select(Symbol, EnsemblID, logFC, adj.P.Val, Description) %>%
@@ -289,14 +306,35 @@ export_top_genes <- function(contrast_name, cluster_id) {
   print(paste("--- TOP MARKERS FOR CLUSTER", cluster_id, "---"))
   print(head(final_table, 5))
   
-    # Save
+  # Save
   filename <- file.path(tables_path, paste0("Cluster_", cluster_id, "_Top_Genes.csv"))
   write.csv(final_table, filename, row.names = FALSE)
+
+  return(dge_result)
 }
 
-export_top_genes("C1_Unique", "1")
-export_top_genes("C2_Unique", "2")
-export_top_genes("C3_Unique", "3")
+dge_result.C1 <- export_top_genes("C1_Unique", "1")
+dge_result.C2 <- export_top_genes("C2_Unique", "2")
+dge_result.C3 <- export_top_genes("C3_Unique", "3")
+
+enhancedVolcanoPlot.C1 <- plotEnhancedVolcano(dge_result.C1, "Subtype 1")
+sharedLegendEnhancedVolcanoPlot <- get_legend(enhancedVolcanoPlot.C1)
+enhancedVolcanoPlot.C1 <- enhancedVolcanoPlot.C1 + theme(legend.position = "none")
+enhancedVolcanoPlot.C2 <- plotEnhancedVolcano(dge_result.C2, "Subtype 2") + 
+  theme(legend.position = "none")
+enhancedVolcanoPlot.C3 <- plotEnhancedVolcano(dge_result.C3, "Subtype 3") + 
+  theme(legend.position = "none")
+
+# Combine the Three Enhanced Volcano Plots to Single Image
+enhancedVolcanoPlot.combined <- grid.arrange(sharedLegendEnhancedVolcanoPlot,
+                                             arrangeGrob(enhancedVolcanoPlot.C1, 
+                                                         enhancedVolcanoPlot.C2, 
+                                                         enhancedVolcanoPlot.C3,
+                                                         nrow=1),
+                                             nrow = 2, heights = c(1,8))
+
+ggsave(file.path(cluster_path, "SubtypeEnhancedVolcanoPlotsCombined.jpg"),
+       plot = enhancedVolcanoPlot.combined, width = 16, height = 6, dpi = 300) 
 
 #-----------------------------------------------------------------------------#
 # COMPLETE

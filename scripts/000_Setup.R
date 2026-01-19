@@ -21,7 +21,7 @@ packages <- c(
   "gt", "gtsummary", "ggsci", "edgeR", "htmltools",
   "ConsensusClusterPlus", "pheatmap", "limma", "qvalue", 
   "biomaRt", "DESeq2", "dplyr", "factoextra", "cluster", "ggpubr",
-  "fpc"
+  "fpc", "EnhancedVolcano", "ggrepel"
 )
 
 message("(I) Loading Packages")
@@ -93,6 +93,14 @@ my_style <- theme(
   axis.title = element_text(face = "bold"),    
   legend.position = "right"                    
 )
+
+#-----------------------------------------------------------------------------#
+# GLOBAL VARIABLES
+#-----------------------------------------------------------------------------#
+
+# Setting P-Value and Log2 Fold-Change Cutoff
+log2FC.cutoff <- 0.585 
+pval.cutoff <- 0.05 
 
 #-----------------------------------------------------------------------------#
 # COMPLETE
