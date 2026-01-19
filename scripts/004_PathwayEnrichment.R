@@ -30,6 +30,7 @@ library(VennDiagram)       # For creating Venn diagrams
 library(rWikiPathways)     # For accessing WikiPathways
 library(dplyr)             # For data manipulation
 library(RCy3)              # For Cytoscape integration
+library(ragg)
 message("\n--- Starting Pathway Enrichment ---")
 
 #-----------------------------------------------------------------------------#
@@ -74,7 +75,7 @@ gender <- factor(sampleData$gender)
 pool <- factor(sampleData$Library.Pool)
 age <- as.numeric(sampleData$age)
 rin <- as.numeric(sampleData$rin)
-
+tin_median <- as.numeric()
 # Check for NAs in covariates
 if(any(is.na(rin))) {
   message("  Warning: NAs found in RIN. Imputing with median.")
@@ -270,6 +271,8 @@ p_faceted <- ggplot(df_filtered, aes(x = Contrast, y = Description)) +
 
 # Save
 ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted.pdf"), p_faceted, width = 14, height = 12)
+ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted_presentation.png"), p_faceted,dpi=1200, width = 10, height = 8)
+
 
 ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted.pdf"), p_faceted, width = 14, height = 12)
 
@@ -426,13 +429,17 @@ message("Saved: Pathway_Genes_Heatmap_Complex.pdf")
 message("Saving PNG version...")
 
 # Define the filename
+
 png_filename <- file.path(enrichment_plots_path, "Pathway_Genes_Heatmap_Complex.png")
 
 # Open PNG device
 # width/height are in inches (same as PDF)
 # res=300 is standard for publication quality (prevents blurry text)
-png(png_filename, width = 12, height = 14, units = "in", res = 300)
 
+agg_png(png_filename, 
+        width = 8, height = 7, units = "in", 
+        res = 1200, 
+        scaling = 1) # scaling=1 ensures text size stays consistent
 # Draw the exact same heatmap object 'ht'
 draw(ht, 
      merge_legend = TRUE, 
@@ -448,7 +455,153 @@ message("Saved: Pathway_Genes_Heatmap_Complex.png")
 
 
 
+png_filename <- file.path(enrichment_plots_path, "Pathway_Genes_Heatmap_Complex_Presentation.png")
 
+agg_png(png_filename, 
+        width = 8, height = 7, units = "in", 
+        res = 1200, 
+        scaling = 1) # scaling=1 ensures text size stays consistent
+# Draw the exact same heatmap object 'ht'
+draw(ht, 
+     merge_legend = TRUE, 
+     column_title = "Gene Expression Landscape of Enriched Pathways", 
+     column_title_gp = gpar(fontsize = 16, fontface = "bold")
+)
+
+# Close the device
+dev.off()
+
+message("Saved: Pathway_Genes_Heatmap_Complex_Presentation.png")
+
+
+
+
+
+
+
+
+
+#-----------------------------------------------------------------------------#
+# Upset plots
+#-----------------------------------------------------------------------------#
+
+
+#-----------------------------------------------------------------------------#
+# UPSET PLOTS: VISUALIZE GENE OVERLAPS
+#-----------------------------------------------------------------------------#
+message("(III-b) Generating UpSet Plots")
+
+library(UpSetR)
+
+# 1. PREPARE DATA
+# We need to separate the 'gene_lists' into UP and DOWN sets
+# and rename them for the plot (e.g., "C1_Identity__UP" -> "Cluster 1")
+
+# Extract UP sets
+up_list <- gene_lists[grep("__UP", names(gene_lists))]
+names(up_list) <- gsub("_Identity__UP", "", names(up_list))
+names(up_list) <- gsub("C1", "Cluster 1", names(up_list))
+names(up_list) <- gsub("C2", "Cluster 2", names(up_list))
+names(up_list) <- gsub("C3", "Cluster 3", names(up_list))
+
+# Extract DOWN sets
+down_list <- gene_lists[grep("__DOWN", names(gene_lists))]
+names(down_list) <- gsub("_Identity__DOWN", "", names(down_list))
+names(down_list) <- gsub("C1", "Cluster 1", names(down_list))
+names(down_list) <- gsub("C2", "Cluster 2", names(down_list))
+names(down_list) <- gsub("C3", "Cluster 3", names(down_list))
+
+#-----------------------------------------------------------------------------#
+# 2. PLOT UPREGULATED INTERSECTIONS
+#-----------------------------------------------------------------------------#
+
+# We use a pdf device to save the plot
+pdf(file.path(plots_path, "UpSet_Upregulated_Genes.pdf"), width = 8, height = 6, onefile=FALSE)
+png(file.path(plots_path, "UpSet_Upregulated_Genes.png"), width = 6, height = 6, units = "in", res = 600)
+
+
+upset(fromList(up_list), 
+      nsets = 3,               # Number of clusters
+      order.by = "freq",       # Sort by size (Largest bars first)
+      empty.intersections = "on",
+      
+      # Visual Styling
+      mainbar.y.label = "Number of Upregulated Genes",
+      sets.x.label = "Total Genes per Cluster",
+      text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3), # Adjust font sizes
+      
+      # Color: Upregulated usually Red
+      main.bar.color = "#E41A1C", 
+      sets.bar.color = "#E41A1C",
+      
+      # Queries: Highlight the "Unique" bars (Degree = 1)
+      # This highlights genes that are ONLY in C1, ONLY in C2, etc.
+      queries = list(
+        list(query = intersects, params = list("Cluster 1"), color = npg_colors[[1]], active = T),
+        list(query = intersects, params = list("Cluster 2"), color = npg_colors[[2]], active = T),
+        list(query = intersects, params = list("Cluster 3"), color = npg_colors[[3]], active = T)
+      )
+)
+dev.off()
+
+     # Resolution (300 dpi is publication standard)
+
+# 2. Run the Plot
+upset(fromList(down_list), 
+      nsets = 3, 
+      order.by = "freq",
+      empty.intersections = "on",
+      # ... (your visual settings) ...
+      mainbar.y.label = "Number of Downregulated Genes",
+      sets.x.label = "Total Genes per Cluster",
+      main.bar.color = "#377EB8", 
+      sets.bar.color = "#377EB8"
+)
+
+# 3. Close the Device
+dev.off()
+
+
+
+#-----------------------------------------------------------------------------#
+# 3. PLOT DOWNREGULATED INTERSECTIONS
+#-----------------------------------------------------------------------------#
+
+pdf(file.path(plots_path, "UpSet_Downregulated_Genes.pdf"), width = 8, height = 6, onefile=FALSE)
+png(file.path(plots_path, "UpSet_Downregulated_Genes.png"), width = 6, height = 6, units = "in", res = 600)
+
+upset(fromList(down_list), 
+      nsets = 3, 
+      order.by = "freq",
+      empty.intersections = "on",
+      
+      # Visual Styling
+      mainbar.y.label = "Number of Downregulated Genes",
+      sets.x.label = "Total Genes per Cluster",
+      text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3),
+      
+      # Color: Downregulated usually Blue
+      main.bar.color = "#377EB8", 
+      sets.bar.color = "#377EB8",
+      
+      # Queries: Highlight Unique bars
+      queries = list(
+        list(query = intersects, params = list("Cluster 1"), color = npg_colors[[1]], active = T),
+        list(query = intersects, params = list("Cluster 2"), color = npg_colors[[2]], active = T),
+        list(query = intersects, params = list("Cluster 3"), color = npg_colors[[3]], active = T)
+      )
+)
+
+
+
+dev.off()
+
+message("UpSet plots saved to plots/UpSet_*.pdf")
+
+
+
+
+#
 
 #-----------------------------------------------------------------------------#
 # Cytoscape mapping
