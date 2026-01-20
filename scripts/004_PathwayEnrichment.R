@@ -58,6 +58,7 @@ rownames(sampleData) <- sampleData$sample_name
 sampleData <- sampleData %>% filter(!is.na(subtype))
 
 
+geneListInfo <- readRDS(file.path(cache_path, "geneListInfo.rds"))
 
 geneExpressionData <- geneExpressionData[, sampleData$sample_name]
 
@@ -169,6 +170,66 @@ write.csv(ck@compareClusterResult, file.path(tables_path, "GO_Enrichment_Results
 
 
 
+if(!exists("ck")) ck <- readRDS(file.path(cache_path, "ck_result.rds")) # Or re-run Step 4 of 003
+if(!exists("geneExpressionData")) geneExpressionData <- readRDS(file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
+if(!exists("sampleData")) sampleData <- readRDS(file.path(cache_path, "sampleData_DCM.rds"))
+
+#-----------------------------------------------------------------------------#
+# 2. EXTRACT GENES FROM PATHWAY CATEGORIES
+#-----------------------------------------------------------------------------#
+message("(I) Parsing Genes from Pathway Terms")
+
+# We use the same dataframe 'df_filtered' you created for the Dotplot
+# If it's not in memory, we recreate the categorization logic briefly here:
+df_raw <- ck@compareClusterResult %>% 
+  mutate(geneID = str_split(geneID, "/")) # Split "GENEA/GENEB" into lists
+
+# Re-apply your categorization logic (Must match your Dotplot code!)
+df_annotated <- df_raw %>% mutate(Category = case_when(
+  str_detect(Description, "(?i)mitochon|respiration|ATP|oxidative|electron|energy|metabolic|fatty") ~ "Mitochondria & Metabolism",
+  str_detect(Description, "(?i)muscle|cardiac|contract|sarcomere|myofibril|heart|actin|z-disc") ~ "Heart Function & Structure",
+  str_detect(Description, "(?i)matrix|collagen|adhesion|junction|fibro") ~ "Extracellular Matrix & Fibrosis",
+  str_detect(Description, "(?i)immune|viral|defense|b cell|t cell|leukocyte|cytokine|inflam") ~ "Immune Response",
+  str_detect(Description, "(?i)translat|ribosom|protein target|folding") ~ "Protein Synthesis & Processing",
+  TRUE ~ "Signaling & Regulation"
+))
+
+# Filter to keep only the TOP terms you visualized (e.g. Top 3 per category)
+# This prevents the heatmap from having 5000 genes
+top_terms <- df_annotated %>%
+  group_by(Category) %>%
+  slice_min(p.adjust, n = 3) %>% # Keep genes from top 3 pathways per group
+  pull(Description)
+
+df_subset <- df_annotated %>% filter(Description %in% top_terms)
+
+#-----------------------------------------------------------------------------#
+# 3. BUILD THE GENE LIST
+#-----------------------------------------------------------------------------#
+message("(II) Building Unique Gene List per Category")
+
+# We need a clean table of: GeneSymbol | Category
+gene_category_map <- df_subset %>%
+  dplyr::select(Category, geneID) %>%
+  unnest(geneID) %>%            # Expand the list so each gene is a row
+  distinct(geneID, .keep_all = TRUE) # Remove duplicates (if gene is in 2 pathways, keep 1)
+
+# Get the list of genes
+target_genes <- gene_category_map$geneID
+
+# Check if these symbols exist in your expression matrix
+# (Your matrix has EnsemblIDs? Or Symbols? This assumes Rownames = Symbols)
+# IF your matrix has EnsemblIDs, we need to map names first (See Note below)
+valid_genes <- intersect(target_genes, rownames(geneExpressionData))
+
+message(paste("Found", length(valid_genes), "unique genes across", length(unique(gene_category_map$Category)), "categories."))
+# Map Symbols -> Ensembl (Only if needed)
+symbol_to_ensembl <- geneListInfo$ensembl_gene_id[match(target_genes, geneListInfo$hgnc_symbol)]
+valid_genes <- symbol_to_ensembl[!is.na(symbol_to_ensembl)]
+heatmap_matrix <- geneExpressionData[valid_genes, ]
+# (Then rename rows back to Symbols for the plot)
+rownames(heatmap_matrix) <- geneListInfo$hgnc_symbol[match(rownames(heatmap_matrix), geneListInfo$ensembl_gene_id)]
+
 
 
 
@@ -232,6 +293,30 @@ df_filtered <- df_plot %>%
   group_by(Contrast, Category) %>%
   slice_min(p.adjust, n = 5) %>%
   ungroup()
+
+gene_category_map <- df_subset %>%
+  dplyr::select(Category, geneID) %>%
+  unnest(geneID) %>%            # Expand the list so each gene is a row
+  distinct(geneID, .keep_all = TRUE) # Remove duplicates (if gene is in 2 pathways, keep 1)
+
+# Get the list of genes
+target_genes <- gene_category_map$geneID
+
+# Check if these symbols exist in your expression matrix
+# (Your matrix has EnsemblIDs? Or Symbols? This assumes Rownames = Symbols)
+# IF your matrix has EnsemblIDs, we need to map names first (See Note below)
+valid_genes <- intersect(target_genes, rownames(geneExpressionData))
+
+message(paste("Found", length(valid_genes), "unique genes across", length(unique(gene_category_map$Category)), "categories."))
+# Map Symbols -> Ensembl (Only if needed)
+symbol_to_ensembl <- geneListInfo$ensembl_gene_id[match(target_genes, geneListInfo$hgnc_symbol)]
+valid_genes <- symbol_to_ensembl[!is.na(symbol_to_ensembl)]
+heatmap_matrix <- geneExpressionData[valid_genes, ]
+# (Then rename rows back to Symbols for the plot)
+rownames(heatmap_matrix) <- geneListInfo$hgnc_symbol[match(rownames(heatmap_matrix), geneListInfo$ensembl_gene_id)]
+
+
+
 
 #-----------------------------------------------------------------------------#
 # 5. VISUALIZATION (Faceted Plot)
