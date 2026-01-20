@@ -22,18 +22,16 @@ message("\n--- Starting Target Integration ---")
 # ------------------------------------------------------------------------------
 message("(I) Loading Lists")
 
-# A. Load the 19 Significant miRNAs (From your Table 2)
-# We need the "gene_symbol" column (e.g., "MIR27B")
+# A. Load necessary data.
 
 setwd(data_path)
 mirna_file <- file.data(data_path, "Table2_Differential_Expression_Results_miRNAs.csv")
 mirna_table <- read.csv("Table2_Differential_Expression_Results_miRNAs.csv")
 sig_mirnas <- subset(mirna_table, comparison == "DCM_vs_Control" & q.value < 0.05)
 
-# Clean names for Database (remove "MIR" prefix often helps, or keep standard)
-# multiMiR expects "hsa-miR-27b". Your table has "MIR27B". We need to convert.
-# Quick/Dirty conversion: "MIR27B" -> "hsa-miR-27b"
-# (Note: This is an estimation. For publication, check exact ID mapping).
+# Clean names for Database 
+# Quick conversion: "MIR27B" -> "hsa-miR-27b"
+
 candidate_mirnas <- paste0("hsa-miR-", tolower(sub("MIR", "", sig_mirnas$gene_symbol)))
 # Handle special cases (e.g., "MIR378A" -> "hsa-miR-378a")
 candidate_mirnas <- gsub("mir([0-9]+)([a-z]*)", "mir-\\1\\2", candidate_mirnas)
@@ -103,7 +101,7 @@ results_pred <- get_multimir(
 
 # 3. Combine Them
 # Use bind_rows or simple rbind if columns match. 
-# multiMiR structures are complex, so we extract @data first.
+
 interactions <- dplyr::bind_rows(results_val@data, results_pred@data)
 
 message(paste("  Validated Hits:", nrow(results_val@data)))
@@ -114,11 +112,9 @@ message(paste("  Predicted Hits:", nrow(results_pred@data)))
 # ------------------------------------------------------------------------------
 message("(III) Processing Interactions")
 
-# We only care about "Inverse Correlations" typically
-# (Upregulated miRNA -> Downregulated Gene)
-# Let's merge the Interaction data with your Cluster Data
 
-# Clean miRNA names back to match (optional)
+# (Upregulated miRNA -> Downregulated Gene)
+# Clean miRNA names back to match 
 interactions$Symbol <- interactions$target_symbol
 
 # Merge with your Cluster Gene info (to see logFC of the gene)
@@ -160,3 +156,4 @@ print(head(c3_hits))
 view(c1_hits)
 view(c2_hits)
 view(c3_hits)
+
