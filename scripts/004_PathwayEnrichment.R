@@ -42,6 +42,7 @@ message("(I) Data Import")
 geneExpressionData <- readRDS(file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
 # Load Full Metadata (For RIN, Pool, etc.)
 sampleData <- readRDS(file.path(cache_path, "sampleData_DCM.rds"))
+geneListInfo <- readRDS(file.path(cache_path, "geneListInfo.rds"))
 
 # Load Your New Clusters (From 002)
 sampleData.subtypes <- readRDS(file.path(cache_path, "sampleData_DCM_subtypes.rds"))
@@ -58,7 +59,6 @@ rownames(sampleData) <- sampleData$sample_name
 sampleData <- sampleData %>% filter(!is.na(subtype))
 
 
-geneListInfo <- readRDS(file.path(cache_path, "geneListInfo.rds"))
 
 geneExpressionData <- geneExpressionData[, sampleData$sample_name]
 
@@ -170,66 +170,6 @@ write.csv(ck@compareClusterResult, file.path(tables_path, "GO_Enrichment_Results
 
 
 
-if(!exists("ck")) ck <- readRDS(file.path(cache_path, "ck_result.rds")) # Or re-run Step 4 of 003
-if(!exists("geneExpressionData")) geneExpressionData <- readRDS(file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
-if(!exists("sampleData")) sampleData <- readRDS(file.path(cache_path, "sampleData_DCM.rds"))
-
-#-----------------------------------------------------------------------------#
-# 2. EXTRACT GENES FROM PATHWAY CATEGORIES
-#-----------------------------------------------------------------------------#
-message("(I) Parsing Genes from Pathway Terms")
-
-# We use the same dataframe 'df_filtered' you created for the Dotplot
-# If it's not in memory, we recreate the categorization logic briefly here:
-df_raw <- ck@compareClusterResult %>% 
-  mutate(geneID = str_split(geneID, "/")) # Split "GENEA/GENEB" into lists
-
-# Re-apply your categorization logic (Must match your Dotplot code!)
-df_annotated <- df_raw %>% mutate(Category = case_when(
-  str_detect(Description, "(?i)mitochon|respiration|ATP|oxidative|electron|energy|metabolic|fatty") ~ "Mitochondria & Metabolism",
-  str_detect(Description, "(?i)muscle|cardiac|contract|sarcomere|myofibril|heart|actin|z-disc") ~ "Heart Function & Structure",
-  str_detect(Description, "(?i)matrix|collagen|adhesion|junction|fibro") ~ "Extracellular Matrix & Fibrosis",
-  str_detect(Description, "(?i)immune|viral|defense|b cell|t cell|leukocyte|cytokine|inflam") ~ "Immune Response",
-  str_detect(Description, "(?i)translat|ribosom|protein target|folding") ~ "Protein Synthesis & Processing",
-  TRUE ~ "Signaling & Regulation"
-))
-
-# Filter to keep only the TOP terms you visualized (e.g. Top 3 per category)
-# This prevents the heatmap from having 5000 genes
-top_terms <- df_annotated %>%
-  group_by(Category) %>%
-  slice_min(p.adjust, n = 3) %>% # Keep genes from top 3 pathways per group
-  pull(Description)
-
-df_subset <- df_annotated %>% filter(Description %in% top_terms)
-
-#-----------------------------------------------------------------------------#
-# 3. BUILD THE GENE LIST
-#-----------------------------------------------------------------------------#
-message("(II) Building Unique Gene List per Category")
-
-# We need a clean table of: GeneSymbol | Category
-gene_category_map <- df_subset %>%
-  dplyr::select(Category, geneID) %>%
-  unnest(geneID) %>%            # Expand the list so each gene is a row
-  distinct(geneID, .keep_all = TRUE) # Remove duplicates (if gene is in 2 pathways, keep 1)
-
-# Get the list of genes
-target_genes <- gene_category_map$geneID
-
-# Check if these symbols exist in your expression matrix
-# (Your matrix has EnsemblIDs? Or Symbols? This assumes Rownames = Symbols)
-# IF your matrix has EnsemblIDs, we need to map names first (See Note below)
-valid_genes <- intersect(target_genes, rownames(geneExpressionData))
-
-message(paste("Found", length(valid_genes), "unique genes across", length(unique(gene_category_map$Category)), "categories."))
-# Map Symbols -> Ensembl (Only if needed)
-symbol_to_ensembl <- geneListInfo$ensembl_gene_id[match(target_genes, geneListInfo$hgnc_symbol)]
-valid_genes <- symbol_to_ensembl[!is.na(symbol_to_ensembl)]
-heatmap_matrix <- geneExpressionData[valid_genes, ]
-# (Then rename rows back to Symbols for the plot)
-rownames(heatmap_matrix) <- geneListInfo$hgnc_symbol[match(rownames(heatmap_matrix), geneListInfo$ensembl_gene_id)]
-
 
 
 
@@ -294,30 +234,6 @@ df_filtered <- df_plot %>%
   slice_min(p.adjust, n = 5) %>%
   ungroup()
 
-gene_category_map <- df_subset %>%
-  dplyr::select(Category, geneID) %>%
-  unnest(geneID) %>%            # Expand the list so each gene is a row
-  distinct(geneID, .keep_all = TRUE) # Remove duplicates (if gene is in 2 pathways, keep 1)
-
-# Get the list of genes
-target_genes <- gene_category_map$geneID
-
-# Check if these symbols exist in your expression matrix
-# (Your matrix has EnsemblIDs? Or Symbols? This assumes Rownames = Symbols)
-# IF your matrix has EnsemblIDs, we need to map names first (See Note below)
-valid_genes <- intersect(target_genes, rownames(geneExpressionData))
-
-message(paste("Found", length(valid_genes), "unique genes across", length(unique(gene_category_map$Category)), "categories."))
-# Map Symbols -> Ensembl (Only if needed)
-symbol_to_ensembl <- geneListInfo$ensembl_gene_id[match(target_genes, geneListInfo$hgnc_symbol)]
-valid_genes <- symbol_to_ensembl[!is.na(symbol_to_ensembl)]
-heatmap_matrix <- geneExpressionData[valid_genes, ]
-# (Then rename rows back to Symbols for the plot)
-rownames(heatmap_matrix) <- geneListInfo$hgnc_symbol[match(rownames(heatmap_matrix), geneListInfo$ensembl_gene_id)]
-
-
-
-
 #-----------------------------------------------------------------------------#
 # 5. VISUALIZATION (Faceted Plot)
 #-----------------------------------------------------------------------------#
@@ -363,6 +279,73 @@ ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted.pdf"), p_faceted,
 
 
 message("(III) Preparing Matrix for ComplexHeatmap")
+
+
+
+
+if(!exists("ck")) ck <- readRDS(file.path(cache_path, "ck_result.rds")) # Or re-run Step 4 of 003
+if(!exists("geneExpressionData")) geneExpressionData <- readRDS(file.path(cache_path, "geneExpressionData_DCM_meanFiltered.rds"))
+if(!exists("sampleData")) sampleData <- readRDS(file.path(cache_path, "sampleData_DCM.rds"))
+
+#-----------------------------------------------------------------------------#
+# 2. EXTRACT GENES FROM PATHWAY CATEGORIES
+#-----------------------------------------------------------------------------#
+message("(I) Parsing Genes from Pathway Terms")
+
+# We use the same dataframe 'df_filtered' you created for the Dotplot
+# If it's not in memory, we recreate the categorization logic briefly here:
+df_raw <- ck@compareClusterResult %>% 
+  mutate(geneID = str_split(geneID, "/")) # Split "GENEA/GENEB" into lists
+
+# Re-apply your categorization logic (Must match your Dotplot code!)
+df_annotated <- df_raw %>% mutate(Category = case_when(
+  str_detect(Description, "(?i)mitochon|respiration|ATP|oxidative|electron|energy|metabolic|fatty") ~ "Mitochondria & Metabolism",
+  str_detect(Description, "(?i)muscle|cardiac|contract|sarcomere|myofibril|heart|actin|z-disc") ~ "Heart Function & Structure",
+  str_detect(Description, "(?i)matrix|collagen|adhesion|junction|fibro") ~ "Extracellular Matrix & Fibrosis",
+  str_detect(Description, "(?i)immune|viral|defense|b cell|t cell|leukocyte|cytokine|inflam") ~ "Immune Response",
+  str_detect(Description, "(?i)translat|ribosom|protein target|folding") ~ "Protein Synthesis & Processing",
+  TRUE ~ "Signaling & Regulation"
+))
+
+# Filter to keep only the TOP terms you visualized (e.g. Top 3 per category)
+# This prevents the heatmap from having 5000 genes
+top_terms <- df_annotated %>%
+  group_by(Category) %>%
+  slice_min(p.adjust, n = 3) %>% # Keep genes from top 3 pathways per group
+  pull(Description)
+
+df_subset <- df_annotated %>% filter(Description %in% top_terms)
+
+#-----------------------------------------------------------------------------#
+# 3. BUILD THE GENE LIST
+#-----------------------------------------------------------------------------#
+message("(II) Building Unique Gene List per Category")
+
+# We need a clean table of: GeneSymbol | Category
+gene_category_map <- df_subset %>%
+  dplyr::select(Category, geneID) %>%
+  unnest(geneID) %>%            # Expand the list so each gene is a row
+  distinct(geneID, .keep_all = TRUE) # Remove duplicates (if gene is in 2 pathways, keep 1)
+
+# Get the list of genes
+target_genes <- gene_category_map$geneID
+
+# Check if these symbols exist in your expression matrix
+# (Your matrix has EnsemblIDs? Or Symbols? This assumes Rownames = Symbols)
+# IF your matrix has EnsemblIDs, we need to map names first (See Note below)
+valid_genes <- intersect(target_genes, rownames(geneExpressionData))
+
+message(paste("Found", length(valid_genes), "unique genes across", length(unique(gene_category_map$Category)), "categories."))
+# Map Symbols -> Ensembl (Only if needed)
+symbol_to_ensembl <- geneListInfo$ensembl_gene_id[match(target_genes, geneListInfo$hgnc_symbol)]
+valid_genes <- symbol_to_ensembl[!is.na(symbol_to_ensembl)]
+heatmap_matrix <- geneExpressionData[valid_genes, ]
+# (Then rename rows back to Symbols for the plot)
+rownames(heatmap_matrix) <- geneListInfo$hgnc_symbol[match(rownames(heatmap_matrix), geneListInfo$ensembl_gene_id)]
+
+
+
+
 
 # 1. Subset & Scale Expression Data
 heatmap_matrix <- geneExpressionData[valid_genes, ]
@@ -600,89 +583,86 @@ names(down_list) <- gsub("C3", "Cluster 3", names(down_list))
 # 2. PLOT UPREGULATED INTERSECTIONS
 #-----------------------------------------------------------------------------#
 
-# We use a pdf device to save the plot
 pdf(file.path(plots_path, "UpSet_Upregulated_Genes.pdf"), width = 8, height = 6, onefile=FALSE)
-png(file.path(plots_path, "UpSet_Upregulated_Genes.png"), width = 6, height = 6, units = "in", res = 600)
-
-
 upset(fromList(up_list), 
-      nsets = 3,               # Number of clusters
-      order.by = "freq",       # Sort by size (Largest bars first)
+      nsets = 3, 
+      order.by = "freq", 
       empty.intersections = "on",
-      
-      # Visual Styling
       mainbar.y.label = "Number of Upregulated Genes",
       sets.x.label = "Total Genes per Cluster",
-      text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3), # Adjust font sizes
-      
-      # Color: Upregulated usually Red
+      text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3), 
       main.bar.color = "#E41A1C", 
       sets.bar.color = "#E41A1C",
-      
-      # Queries: Highlight the "Unique" bars (Degree = 1)
-      # This highlights genes that are ONLY in C1, ONLY in C2, etc.
       queries = list(
         list(query = intersects, params = list("Cluster 1"), color = npg_colors[[1]], active = T),
         list(query = intersects, params = list("Cluster 2"), color = npg_colors[[2]], active = T),
         list(query = intersects, params = list("Cluster 3"), color = npg_colors[[3]], active = T)
       )
 )
-dev.off()
+dev.off() # Close PDF
 
-     # Resolution (300 dpi is publication standard)
-
-# 2. Run the Plot
-upset(fromList(down_list), 
+# --- Save PNG ---
+png(file.path(plots_path, "UpSet_Upregulated_Genes.png"), width = 6, height = 6, units = "in", res = 600)
+upset(fromList(up_list), 
       nsets = 3, 
-      order.by = "freq",
+      order.by = "freq", 
       empty.intersections = "on",
-      # ... (your visual settings) ...
-      mainbar.y.label = "Number of Downregulated Genes",
+      mainbar.y.label = "Number of Upregulated Genes",
       sets.x.label = "Total Genes per Cluster",
-      main.bar.color = "#377EB8", 
-      sets.bar.color = "#377EB8"
+      text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3), 
+      main.bar.color = "#E41A1C", 
+      sets.bar.color = "#E41A1C",
+      queries = list(
+        list(query = intersects, params = list("Cluster 1"), color = npg_colors[[1]], active = T),
+        list(query = intersects, params = list("Cluster 2"), color = npg_colors[[2]], active = T),
+        list(query = intersects, params = list("Cluster 3"), color = npg_colors[[3]], active = T)
+      )
 )
+dev.off() # Close PNG
 
-# 3. Close the Device
-dev.off()
-
-
-
-#-----------------------------------------------------------------------------#
+# -----------------------------------------------------------------------------
 # 3. PLOT DOWNREGULATED INTERSECTIONS
-#-----------------------------------------------------------------------------#
+# -----------------------------------------------------------------------------
 
+# --- Save PDF ---
 pdf(file.path(plots_path, "UpSet_Downregulated_Genes.pdf"), width = 8, height = 6, onefile=FALSE)
-png(file.path(plots_path, "UpSet_Downregulated_Genes.png"), width = 6, height = 6, units = "in", res = 600)
-
 upset(fromList(down_list), 
       nsets = 3, 
       order.by = "freq",
       empty.intersections = "on",
-      
-      # Visual Styling
       mainbar.y.label = "Number of Downregulated Genes",
       sets.x.label = "Total Genes per Cluster",
       text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3),
-      
-      # Color: Downregulated usually Blue
       main.bar.color = "#377EB8", 
       sets.bar.color = "#377EB8",
-      
-      # Queries: Highlight Unique bars
       queries = list(
         list(query = intersects, params = list("Cluster 1"), color = npg_colors[[1]], active = T),
         list(query = intersects, params = list("Cluster 2"), color = npg_colors[[2]], active = T),
         list(query = intersects, params = list("Cluster 3"), color = npg_colors[[3]], active = T)
       )
 )
+dev.off() # Close PDF
 
+# --- Save PNG ---
+png(file.path(plots_path, "UpSet_Downregulated_Genes.png"), width = 6, height = 6, units = "in", res = 600)
+upset(fromList(down_list), 
+      nsets = 3, 
+      order.by = "freq",
+      empty.intersections = "on",
+      mainbar.y.label = "Number of Downregulated Genes",
+      sets.x.label = "Total Genes per Cluster",
+      text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3),
+      main.bar.color = "#377EB8", 
+      sets.bar.color = "#377EB8",
+      queries = list(
+        list(query = intersects, params = list("Cluster 1"), color = npg_colors[[1]], active = T),
+        list(query = intersects, params = list("Cluster 2"), color = npg_colors[[2]], active = T),
+        list(query = intersects, params = list("Cluster 3"), color = npg_colors[[3]], active = T)
+      )
+)
+dev.off() # Close PNG
 
-
-dev.off()
-
-message("UpSet plots saved to plots/UpSet_*.pdf")
-
+message("UpSet plots saved to plots/UpSet_*.pdf and *.png")
 
 
 
