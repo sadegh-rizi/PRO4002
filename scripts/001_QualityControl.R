@@ -35,10 +35,10 @@ sampleData.RAW <- read_excel("MAGNET_SampleData_18112022_WithDescriptions.xlsx",
 setwd(script_path)
 
 # View Imported Data As Simple Quality Check 
-View(exonLengthsData)
-View(geneExpressionData.CPM)
-View(sampleDescriptionData)
-View(sampleData.RAW)
+# View(exonLengthsData)
+# View(geneExpressionData.CPM)
+# View(sampleDescriptionData)
+# View(sampleData.RAW)
 
 # Inspect Dimensions, Storage and NAs in Preparation of Preprocessing 
 Hmisc::contents(exonLengthsData)
@@ -81,13 +81,13 @@ colnames(sampleData) <- sampleData.colnames
 sampleData$race <- factor(sampleData$race, levels=c("AA", "Caucasian"), 
                           labels = c("African American", "Caucasian"))
 sampleData$afib <- factor(sampleData$afib, levels = c("Yes", "No"), 
-                          labels = c("Presence", "Absent"))
+                          labels = c("Present", "Absent"))
 sampleData$VTVF <- factor(sampleData$VTVF, levels = c("Yes", "No"), 
-                          labels = c("Presence", "Absent"))
+                          labels = c("Present", "Absent"))
 sampleData$Diabetes <- factor(sampleData$Diabetes, levels = c("Yes", "No"), 
-                              labels = c("Presence", "Absent"))
+                              labels = c("Present", "Absent"))
 sampleData$Hypertension <- factor(sampleData$Hypertension, levels = c("Yes", "No"), 
-                                  labels = c("Presence", "Absent"))
+                                  labels = c("Present", "Absent"))
 sampleData$etiology <- factor(sampleData$etiology, levels = c("NF", "DCM", "HCM", "PPCM"), 
                               labels = c("Control", "DCM", "HCM", "PPCM"))
 
@@ -155,14 +155,13 @@ clinicalSampleDataPlot <- ggplot(clinicalSampleData, aes(x = etiology, y = value
     x = "Disease Group",
     y = "Value (scales vary)",
     fill = "Etiology"
-  )
-  center_title + my_style + 
+  ) + center_title + my_style + 
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
     legend.position = "none", # Legend is redundant since x-axis is labeled
     strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
     strip.text.x = element_text(face = "bold", size = 20)
-  ) +
+  ) 
 
 ggsave(file.path(quality_control_path, "clinicalSampleDataPlot.jpg"), clinicalSampleDataPlot, width = 10, height = 8)
 
@@ -365,7 +364,8 @@ clinicalSampleDataPlot.DCM <- ggplot(clinicalSampleData.DCM, aes(y = value)) +
     axis.ticks.x = element_blank(),
     legend.position = "none", # Legend is redundant since x-axis is labeled
     strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
-    strip.text = element_text(face = "bold", size = 20)
+    strip.text = element_text(face = "bold", size = 20),
+    
   ) +
   center_title + my_style
 
@@ -398,13 +398,13 @@ diseaseSampleDataPlot.DCM <- ggplot(diseaseSampleData.DCM, aes(x = value)) +
     title = "DCM Patient Disease Characteristics",
     y = "Count",
     x = ""
-  ) +
+  ) + center_title + my_style +
   theme(
     legend.position = "none", # Legend is redundant since x-axis is labeled
     strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
-    strip.text = element_text(face = "bold", size = 20)
-  ) +
-  center_title + my_style
+    strip.text = element_text(face = "bold", size = 20), 
+    axis.text.x = element_text(angle = 45, hjust = 1) 
+  ) 
 
 ggsave(file.path(quality_control_path, "diseaseSampleDataPlot_DCM.png"), diseaseSampleDataPlot.DCM, width = 6, height = 8)
 
