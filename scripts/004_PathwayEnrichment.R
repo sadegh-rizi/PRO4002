@@ -17,20 +17,6 @@ source(here::here("scripts", "000_setup.R"))
 enrichment_plots_path <- file.path(plots_path, "PathwayEnrichment")
 if(!dir.exists(enrichment_plots_path)) dir.create(enrichment_plots_path, recursive = TRUE)
 
-library(tidyverse)
-library(limma)
-library(edgeR)
-library(clusterProfiler)
-library(org.Hs.eg.db)
-library(enrichplot)
-library(rstudioapi)        # For setting working directory
-library(readxl)            # For reading Excel files
-library(EnhancedVolcano)   # For creating volcano plots
-library(VennDiagram)       # For creating Venn diagrams
-library(rWikiPathways)     # For accessing WikiPathways
-library(dplyr)             # For data manipulation
-library(RCy3)              # For Cytoscape integration
-library(ragg)
 message("\n--- Starting Pathway Enrichment ---")
 
 #-----------------------------------------------------------------------------#
@@ -57,8 +43,6 @@ rownames(sampleData) <- sampleData$sample_name
 # Filter: Ensure we only keep samples that have a subtype
 sampleData <- sampleData %>% filter(!is.na(subtype))
 
-
-
 geneExpressionData <- geneExpressionData[, sampleData$sample_name]
 
 message(paste("  Analyzing", ncol(geneExpressionData), "samples with defined subtypes."))
@@ -70,12 +54,13 @@ message("(II) Differential Expression for Pathways")
 
 # A. Design Matrix (Including Covariates)
 # Ensure factors are set correctly
-group <- factor(sampleData$subtype, levels = c("Cluster_1", "Cluster_2", "Cluster_3"))
+group <- factor(sampleData$subtype, levels = c("Cluster 1", "Cluster 2", "Cluster 3"), labels = c("Cluster_1", "Cluster_2", "Cluster_3"))
 gender <- factor(sampleData$gender)
 pool <- factor(sampleData$Library.Pool)
 age <- as.numeric(sampleData$age)
 rin <- as.numeric(sampleData$rin)
-tin_median <- as.numeric()
+tin_median <- as.numeric(sampleData$tin_median)
+
 # Check for NAs in covariates
 if(any(is.na(rin))) {
   message("  Warning: NAs found in RIN. Imputing with median.")
@@ -148,7 +133,6 @@ for(comp in comparisons) {
 #-----------------------------------------------------------------------------#
 message("(IV) Running GO Enrichment")
 
-
 ck <- compareCluster(
   geneCluster = gene_lists, 
   universe=all_genes_entrez,
@@ -164,18 +148,6 @@ ck <- compareCluster(
 
 # Save the raw table
 write.csv(ck@compareClusterResult, file.path(tables_path, "GO_Enrichment_Results.csv"))
-
-
-
-
-
-
-
-
-
-
-
-
 
 #-----------------------------------------------------------------------------#
 # 4b. SIMPLIFY & CATEGORIZE (The "Facet" Strategy)
@@ -250,7 +222,7 @@ p_faceted <- ggplot(df_filtered, aes(x = Contrast, y = Description)) +
   facet_grid(Category ~ ., scales = "free_y", space = "free_y") +
   
   # Colors
-  scale_color_manual(values = c("DOWN" = "#377EB8", "UP" = "#E41A1C")) +
+  scale_color_manual(values = c("DOWN" = standard_color, "UP" = orange_color)) +
   
   # Formatting
   theme_bw(base_size = 12) +
@@ -276,7 +248,6 @@ ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted_presentation.png"
 
 ggsave(file.path(enrichment_plots_path, "GO_Enrichment_Faceted.pdf"), p_faceted, width = 14, height = 12)
 
-
 message("(III) Preparing Matrix for ComplexHeatmap")
 
 # 1. Subset & Scale Expression Data
@@ -288,12 +259,9 @@ heatmap_scaled <- t(scale(t(heatmap_matrix)))
 row_categories <- gene_category_map$Category[match(rownames(heatmap_scaled), gene_category_map$geneID)]
 
 # 3. Define Colors (ComplexHeatmap format)
-# We use the 'circlize' package for the gradient
-library(ComplexHeatmap)
-library(circlize)
 
 # Heatmap Body Colors (Blue -> White -> Red)
-col_fun <- colorRamp2(c(-2, 0, 2), c("navy", "white", "firebrick3"))
+col_fun <- colorRamp2(c(-2, 0, 2), standard_color, "white", orange_color)
 
 # Annotation Colors
 # Note: Ensure npg_colors are defined (from your setup script)
@@ -349,19 +317,16 @@ heatmap_scaled <- t(scale(t(heatmap_matrix)))
 #-----------------------------------------------------------------------------#
 message("(IV) Generating ComplexHeatmap")
 
-library(ComplexHeatmap)
-library(circlize)
-
 # Colors
-col_fun <- colorRamp2(c(-2, 0, 2), c("navy", "white", "firebrick3"))
+col_fun <- colorRamp2(c(-2, 0, 2), c(standard_color, "white", orange_color))
 
 category_colors <- c(
-  "Mitochondria & Metabolism" = "#E64B35",
-  "Heart Function & Structure" = "#4DBBD5",
-  "Extracellular Matrix & Fibrosis" = "#00A087",
-  "Immune Response" = "#3C5488",
-  "Protein Synthesis & Processing" = "#F39B7F",
-  "Signaling & Regulation" = "#8491B4"
+  "Mitochondria & Metabolism" = npg_additional_colors[[4]],
+  "Heart Function & Structure" = npg_additional_colors[[5]],
+  "Extracellular Matrix & Fibrosis" = npg_additional_colors[[6]],
+  "Immune Response" = npg_additional_colors[[7]],
+  "Protein Synthesis & Processing" = npg_additional_colors[[8]],
+  "Signaling & Regulation" = npg_additional_colors[[9]]
 )
 
 subtype_colors <- c(
@@ -519,11 +484,10 @@ names(down_list) <- gsub("C3", "Cluster 3", names(down_list))
 pdf(file.path(plots_path, "UpSet_Upregulated_Genes.pdf"), width = 8, height = 6, onefile=FALSE)
 png(file.path(plots_path, "UpSet_Upregulated_Genes.png"), width = 6, height = 6, units = "in", res = 600)
 
-
 upset(fromList(up_list), 
       nsets = 3,               # Number of clusters
       order.by = "freq",       # Sort by size (Largest bars first)
-      empty.intersections = "on",
+      empty.intersections = "on", 
       
       # Visual Styling
       mainbar.y.label = "Number of Upregulated Genes",
@@ -531,8 +495,8 @@ upset(fromList(up_list),
       text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3), # Adjust font sizes
       
       # Color: Upregulated usually Red
-      main.bar.color = "#E41A1C", 
-      sets.bar.color = "#E41A1C",
+      main.bar.color = orange_color, 
+      sets.bar.color = orange_color,
       
       # Queries: Highlight the "Unique" bars (Degree = 1)
       # This highlights genes that are ONLY in C1, ONLY in C2, etc.
@@ -554,8 +518,8 @@ upset(fromList(down_list),
       # ... (your visual settings) ...
       mainbar.y.label = "Number of Downregulated Genes",
       sets.x.label = "Total Genes per Cluster",
-      main.bar.color = "#377EB8", 
-      sets.bar.color = "#377EB8"
+      main.bar.color = alpha(standard_color, 0.7), 
+      sets.bar.color = alpha(standard_color, 0.7)
 )
 
 # 3. Close the Device
@@ -581,8 +545,8 @@ upset(fromList(down_list),
       text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.3),
       
       # Color: Downregulated usually Blue
-      main.bar.color = "#377EB8", 
-      sets.bar.color = "#377EB8",
+      main.bar.color = standard_color, 
+      sets.bar.color = standard_color,
       
       # Queries: Highlight Unique bars
       queries = list(
@@ -591,8 +555,6 @@ upset(fromList(down_list),
         list(query = intersects, params = list("Cluster 3"), color = npg_colors[[3]], active = T)
       )
 )
-
-
 
 dev.off()
 

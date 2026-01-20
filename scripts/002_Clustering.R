@@ -198,9 +198,8 @@ stabilityScoreBarPlot <- ggplot(geneData.stabilityScoresDF, aes(x=cluster,y=stab
   annotate("text", x = 0, y = 0.6, label = "Threshold", color = standard_color, vjust = -0.5,
     hjust = -0.3, size = 4) +
   labs(title  = "Cluster Stability (Bootstrap) Score", x="", y = "Jaccard Similarity Score") +
-  geom_text(aes(label = round(stability_score,3)), vjust = -0.5) + 
-  scale_color_npg() +
-  scale_fill_npg() +
+  geom_text(aes(label = round(stability_score,3)), vjust = -0.5, size=8) + 
+  scale_y_continuous(limits = c(0, 1.1)) + 
   center_title + my_style
 
 ggsave(file.path(cluster_path, "stabiltiyScorePlot.png"), plot = stabilityScoreBarPlot, 
@@ -220,7 +219,7 @@ geneExpressionDataPCAPlot <- fviz_cluster(list(data = t(geneExpressionData.varia
   ggtheme = my_style, main = "PCA: DCM Subtypes") +
   labs(color = "", fill = "", shape = "")
   
-ggsave(file.path(cluster_path, "subtypePCAPlot.jpg"), geneExpressionDataPCAPlot, width = 6, height = 5)
+ggsave(file.path(cluster_path, "subtypePCAPlot.png"), geneExpressionDataPCAPlot, width = 8, height = 6)
 
 # CLINICAL PHENOTYPE CHECK 
 
@@ -276,11 +275,24 @@ contrast_matrix <- makeContrasts(
 fit2 <- contrasts.fit(fit, contrast_matrix)
 fit2 <- eBayes(fit2)
 
-plotEnhancedVolcano <- function(results_dgea, title, pval_cutoff = pval.cutoff, 
+plotEnhancedVolcano <- function(results_dgea, title, genes, pval_cutoff = pval.cutoff, 
                                 log2Fc_cutoff = log2FC.cutoff) {
   plot <- EnhancedVolcano(results_dgea,  title = title, labSize = 3, 
-                          x = 'logFC', y = 'P.Value', 
-                          lab = row.names(results_dgea),
+                          x = 'logFC', y = 'P.Value',
+                          lab = genes,
+                          selectLab = head(genes),
+                          labCol = 'black',
+                          labFace = 'bold',
+                          drawConnectors = TRUE,
+                          widthConnectors = 0.5,
+                          max.overlaps = Inf,
+                          boxedLabels = TRUE,
+                          col = c(
+                            "grey30",   # NS
+                            accent_color,   # Log2FC
+                            standard_color,   # p-value
+                            orange_color       # p-value & Log2FC 
+                          ),
                           pCutoff = pval_cutoff, 
                           FCcutoff = log2Fc_cutoff)
   return(plot)
@@ -289,7 +301,7 @@ plotEnhancedVolcano <- function(results_dgea, title, pval_cutoff = pval.cutoff,
 export_top_genes <- function(contrast_name, cluster_id) {
   
   # Get Top 50 Genes
-  top_table <- topTable(fit2, coef = contrast_name, number = 50, adjust.method = "fdr")
+  top_table <- topTable(fit2, coef = contrast_name, number = nrow(geneExpressionData.CPM.meanFiltered.DCM), adjust.method = "fdr")
   dge_result <- topTable(fit2, coef = contrast_name, number = nrow(geneExpressionData.CPM.meanFiltered.DCM))
 
   # Annotate
@@ -310,19 +322,19 @@ export_top_genes <- function(contrast_name, cluster_id) {
   filename <- file.path(tables_path, paste0("Cluster_", cluster_id, "_Top_Genes.csv"))
   write.csv(final_table, filename, row.names = FALSE)
 
-  return(dge_result)
+  return(list(dge = dge_result, table = final_table))
 }
 
-dge_result.C1 <- export_top_genes("C1_Unique", "1")
-dge_result.C2 <- export_top_genes("C2_Unique", "2")
-dge_result.C3 <- export_top_genes("C3_Unique", "3")
+results.C1 <- export_top_genes("C1_Unique", "1")
+results.C2 <- export_top_genes("C2_Unique", "2")
+results.C3 <- export_top_genes("C3_Unique", "3")
 
-enhancedVolcanoPlot.C1 <- plotEnhancedVolcano(dge_result.C1, "Subtype 1")
+enhancedVolcanoPlot.C1 <- plotEnhancedVolcano(results.C1$dge, "Subtype 1", results.C1$table$Symbol)
 sharedLegendEnhancedVolcanoPlot <- get_legend(enhancedVolcanoPlot.C1)
 enhancedVolcanoPlot.C1 <- enhancedVolcanoPlot.C1 + theme(legend.position = "none")
-enhancedVolcanoPlot.C2 <- plotEnhancedVolcano(dge_result.C2, "Subtype 2") + 
+enhancedVolcanoPlot.C2 <- plotEnhancedVolcano(results.C2$dge, "Subtype 1", results.C2$table$Symbol) +
   theme(legend.position = "none")
-enhancedVolcanoPlot.C3 <- plotEnhancedVolcano(dge_result.C3, "Subtype 3") + 
+enhancedVolcanoPlot.C3 <- plotEnhancedVolcano(results.C3$dge, "Subtype 1", results.C3$table$Symbol) +
   theme(legend.position = "none")
 
 # Combine the Three Enhanced Volcano Plots to Single Image

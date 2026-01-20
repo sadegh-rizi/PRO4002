@@ -20,8 +20,11 @@ packages <- c(
   "readr", "readxl", "gprofiler2", "knitr", "Hmisc", "table1",
   "gt", "gtsummary", "ggsci", "edgeR", "htmltools",
   "ConsensusClusterPlus", "pheatmap", "limma", "qvalue", 
-  "biomaRt", "DESeq2", "dplyr", "factoextra", "cluster", "ggpubr",
-  "fpc", "EnhancedVolcano", "ggrepel"
+  "biomaRt", "DESeq2", "factoextra", "cluster", "ggpubr",
+  "fpc", "EnhancedVolcano", "ggrepel", "clusterProfiler", 
+  "org.Hs.eg.db", "enrichplot", "rstudioapi", "VennDiagram", 
+  "rWikiPathways", "RCy3", "ragg", "ComplexHeatmap", "circlize",
+  "UpSetR"
 )
 
 message("(I) Loading Packages")
@@ -80,6 +83,7 @@ message("(III) Setting Up Style")
 npg_colors <- pal_npg("nrc", alpha = 1)(10)
 standard_color <- "#001C3D"
 accent_color <- "#00A2DB"
+orange_color <- "#E84E10"
 npg_additional_colors <- colorRampPalette(npg_colors)(20)
 continuous_npg_colors <- colorRampPalette(c(npg_colors[2], "white"))(100)
 
@@ -89,8 +93,11 @@ center_title <- theme(plot.title = element_text(hjust = 0.5, vjust = 1))
 target_font <- "sans" 
 my_style <- theme(
   text = element_text(family = target_font),        
-  plot.title = element_text(hjust = 0.5, face="bold"),
-  axis.title = element_text(face = "bold"),    
+  plot.title = element_text(hjust = 0.5, face="bold", size=20),
+  axis.title = element_text(face = "bold", size=20),
+  legend.text = element_text(size=20),
+  axis.text = element_text(size=20),
+  legend.title = element_text(face = "bold", size=20),
   legend.position = "right"                    
 )
 

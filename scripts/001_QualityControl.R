@@ -155,14 +155,14 @@ clinicalSampleDataPlot <- ggplot(clinicalSampleData, aes(x = etiology, y = value
     x = "Disease Group",
     y = "Value (scales vary)",
     fill = "Etiology"
-  ) +
+  )
+  center_title + my_style + 
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
     legend.position = "none", # Legend is redundant since x-axis is labeled
     strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
-    strip.text = element_text(face = "bold")
+    strip.text.x = element_text(face = "bold", size = 20)
   ) +
-  center_title + my_style
 
 ggsave(file.path(quality_control_path, "clinicalSampleDataPlot.jpg"), clinicalSampleDataPlot, width = 10, height = 8)
 
@@ -365,7 +365,7 @@ clinicalSampleDataPlot.DCM <- ggplot(clinicalSampleData.DCM, aes(y = value)) +
     axis.ticks.x = element_blank(),
     legend.position = "none", # Legend is redundant since x-axis is labeled
     strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
-    strip.text = element_text(face = "bold")
+    strip.text = element_text(face = "bold", size = 20)
   ) +
   center_title + my_style
 
@@ -402,7 +402,7 @@ diseaseSampleDataPlot.DCM <- ggplot(diseaseSampleData.DCM, aes(x = value)) +
   theme(
     legend.position = "none", # Legend is redundant since x-axis is labeled
     strip.background = element_rect(fill = "lightgrey"), # Gray headers for panels
-    strip.text = element_text(face = "bold")
+    strip.text = element_text(face = "bold", size = 20)
   ) +
   center_title + my_style
 
